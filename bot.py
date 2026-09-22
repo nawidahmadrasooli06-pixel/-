@@ -1,12 +1,26 @@
 import os
 import logging
+from threading import Thread
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # تنظیمات لوگ‌ها
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# متن بخش درباره سازنده (نوید)
+# ساخت یک وب‌سرور کوچک برای اینکه Render بلافاصله پروژه را Live شناسایی کند
+web_app = Flask('')
+
+@web_app.route('/')
+def home():
+    return "Bot is alive and running!"
+
+def run_web():
+    # Render به‌صورت خودکار پورت را در متغیر PORT قرار می‌دهد
+    port = int(os.environ.get("PORT", 8080))
+    web_app.run(host='0.0.0.0', port=port)
+
+# اطلاعات سازنده و متن درباره ربات
 ABOUT_TEXT_FA = (
     "🎮 **ربات بازی هیجان‌انگیز**\n\n"
     "👨‍💻 **طراحی و توسعه‌یافته توسط:** 〘Cactuc = نــوید\n"
@@ -23,7 +37,6 @@ ABOUT_TEXT_EN = (
     "📌 *This gaming bot is created purely for your entertainment. Hope you enjoy it! ❤️*"
 )
 
-# منوی اصلی
 def get_main_menu(lang="fa"):
     if lang == "fa":
         keyboard = [
@@ -41,20 +54,15 @@ def get_main_menu(lang="fa"):
         ]
     return InlineKeyboardMarkup(keyboard)
 
-# دستور start/
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     lang = context.user_data.get("lang", "fa")
-    
     welcome_msg = f"سلام {user.first_name} عزیز! 👋\nبه ربات گیمینگ نوید خوش آمدی. یک حالت بازی را انتخاب کن:" if lang == "fa" else f"Welcome {user.first_name}! 👋\nChoose a game mode to start:"
-    
     await update.message.reply_text(welcome_msg, reply_markup=get_main_menu(lang), parse_mode="Markdown")
 
-# مدیریت کلیک روی دکمه‌ها
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
     lang = context.user_data.get("lang", "fa")
     data = query.data
 
@@ -101,17 +109,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت / Back", callback_data="main_menu")]])
         await query.edit_message_text(msg, reply_markup=back_btn)
 
-# اجرای اصلی ربات
 if __name__ == "__main__":
-    # گرفتن توکن از متغیرهای محیطی Render
     TOKEN = os.environ.get("BOT_TOKEN")
     
-    if not TOKEN:
-        print("خطا: BOT_TOKEN در Environment Variables تعریف نشده است!")
-    else:
+    # روشن کردن وب‌سرور در یک ترِد جداگانه
+    Thread(target=run_web).start()
+    
+    if TOKEN:
         app = Application.builder().token(TOKEN).build()
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CallbackQueryHandler(button_handler))
-        
-        print("ربات نوید با موفقیت و بدون باگ در حال اجرا است...")
+        print("ربات نوید روشن شد...")
         app.run_polling()
