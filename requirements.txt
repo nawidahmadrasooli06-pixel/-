@@ -1,2 +1,6 @@
-python-telegram-bot>=21.0
-flask
+python-telegram-bot>=20.0
+Flask>=3.0.0
+flask-socketio>=5.3.0
+python-socketio>=5.10.0
+gevent-websocket>=0.10.1
+gunicorn>=21.0.0
