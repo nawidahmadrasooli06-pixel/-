@@ -6,7 +6,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppI
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 # ==========================================
-# 1. WEB SERVER & MINI APP FOR NEHREGAK
+# 1. WEB SERVER & MINI APP FOR NEHREGAK / SEREKAK
 # ==========================================
 app = Flask(__name__)
 
@@ -16,7 +16,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>👑 نبرد حماسی نه‌رگک</title>
+    <title>👑 نبرد استراتژیک آنلاین</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
     <style>
@@ -35,13 +35,13 @@ HTML_TEMPLATE = """
         .header { text-align: center; margin-bottom: 8px; }
         .title { font-size: 20px; font-weight: bold; color: #38bdf8; margin-bottom: 4px; }
         .status { 
-            font-size: 12px; 
+            font-size: 13px; 
             color: #f1f5f9; 
             background: #1e293b; 
-            padding: 6px 14px; 
+            padding: 8px 16px; 
             border-radius: 20px; 
             border: 1px solid #38bdf8; 
-            min-height: 36px; 
+            min-height: 40px; 
             display: flex; 
             align-items: center; 
             justify-content: center;
@@ -82,10 +82,10 @@ HTML_TEMPLATE = """
 
         .point {
             position: absolute;
-            width: 26px;
-            height: 26px;
+            width: 28px;
+            height: 28px;
             border-radius: 50%;
-            background: rgba(255, 255, 255, 0.15);
+            background: rgba(255, 255, 255, 0.12);
             border: 2px solid #38bdf8;
             transform: translate(-50%, -50%);
             z-index: 2;
@@ -93,22 +93,22 @@ HTML_TEMPLATE = """
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: border-color 0.3s, background 0.3s;
+            transition: all 0.2s ease;
         }
         .point.selected {
             border-color: #facc15;
-            box-shadow: 0 0 14px #facc15;
-            background: rgba(250, 204, 21, 0.4);
+            box-shadow: 0 0 16px #facc15;
+            background: rgba(250, 204, 21, 0.3);
         }
         .point.killable {
             border-color: #ef4444;
-            box-shadow: 0 0 14px #ef4444;
-            animation: pulse 1s infinite;
+            box-shadow: 0 0 16px #ef4444;
+            animation: pulse 0.8s infinite;
         }
         .point.mill-highlight {
             border-color: #facc15;
-            box-shadow: 0 0 18px #facc15;
-            animation: millPulse 0.8s infinite alternate;
+            box-shadow: 0 0 20px #facc15;
+            animation: millPulse 0.6s infinite alternate;
         }
 
         @keyframes pulse {
@@ -118,21 +118,22 @@ HTML_TEMPLATE = """
         }
         @keyframes millPulse {
             0% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 8px #facc15; }
-            100% { transform: translate(-50%, -50%) scale(1.25); box-shadow: 0 0 20px #facc15; }
+            100% { transform: translate(-50%, -50%) scale(1.25); box-shadow: 0 0 22px #facc15; }
         }
 
         .board-piece {
             position: absolute;
-            width: 20px;
-            height: 20px;
+            width: 22px;
+            height: 22px;
             border-radius: 50%;
             transform: translate(-50%, -50%);
             z-index: 3;
-            transition: left 0.4s ease-in-out, top 0.4s ease-in-out;
+            /* انیمیشن کشویی واقعی مهره‌ها */
+            transition: left 0.45s cubic-bezier(0.4, 0, 0.2, 1), top 0.45s cubic-bezier(0.4, 0, 0.2, 1);
             pointer-events: none;
         }
-        .board-piece.blue { background: #00d2ff; box-shadow: 0 0 8px #00d2ff; }
-        .board-piece.red { background: #ff416c; box-shadow: 0 0 8px #ff416c; }
+        .board-piece.blue { background: #00d2ff; box-shadow: 0 0 10px #00d2ff; }
+        .board-piece.red { background: #ff416c; box-shadow: 0 0 10px #ff416c; }
 
         .graveyard {
             position: absolute;
@@ -156,7 +157,7 @@ HTML_TEMPLATE = """
         .graveyard-piece.red { background: #ff416c; }
 
         .btn-reset {
-            margin-top: 12px;
+            margin-top: 14px;
             padding: 10px 24px;
             background: #ef4444;
             color: white;
@@ -167,12 +168,11 @@ HTML_TEMPLATE = """
             box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
         }
 
-        /* WINNER MODAL */
         .modal {
             display: none;
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(15, 23, 42, 0.85);
+            background: rgba(15, 23, 42, 0.88);
             z-index: 100;
             flex-direction: column;
             align-items: center;
@@ -200,7 +200,7 @@ HTML_TEMPLATE = """
 <body>
 
     <div class="header">
-        <div class="title">👑 نبرد حماسی نه‌رگک</div>
+        <div class="title" id="game-title">👑 نبرد حماسی نه‌رگک</div>
         <div class="status" id="status-text">شروع بازی...</div>
     </div>
 
@@ -210,7 +210,7 @@ HTML_TEMPLATE = """
             <div class="pieces-container" id="blue-hand"></div>
         </div>
         <div class="hand-box">
-            <div class="hand-title red">کامپیوتر: 9</div>
+            <div class="hand-title red" id="opp-name-display">کامپیوتر: 9</div>
             <div class="pieces-container" id="red-hand"></div>
         </div>
     </div>
@@ -232,7 +232,6 @@ HTML_TEMPLATE = """
 
     <button class="btn-reset" onclick="resetGame()">شروع مجدد بازی</button>
 
-    <!-- WINNER MODAL -->
     <div class="modal" id="winner-modal">
         <div class="modal-content">
             <div class="winner-title">🎉 پایان بازی 🎉</div>
@@ -245,7 +244,7 @@ HTML_TEMPLATE = """
         const tg = window.Telegram?.WebApp;
         if (tg) tg.expand();
 
-        let playerName = prompt("لطفاً نام خود را برای بازی وارد کنید:", "احمد") || "احمد";
+        let playerName = prompt("لطفاً نام خود را برای بازی وارد کنید:", "بازیکن") || "بازیکن";
 
         const POINTS = [
             {id: 0, x: 20, y: 20}, {id: 1, x: 170, y: 20}, {id: 2, x: 320, y: 20},
@@ -276,9 +275,8 @@ HTML_TEMPLATE = """
             isRemoving: false,
             killedBlue: 0,
             killedRed: 0,
-            formedMillsBlue: [],
-            formedMillsRed: [],
-            lastBrokenMillBlue: null,
+            disabledMillsBlue: [], // قطارهای قبلاً ساخته‌شده که تا قطار جدید ساخته نشود قفل هستند
+            disabledMillsRed: [],
             highlightedMill: [],
             gameOver: false
         };
@@ -289,6 +287,8 @@ HTML_TEMPLATE = """
 
         function initBoard() {
             document.getElementById('player-name-display').innerText = `${playerName} (آبی)`;
+            document.getElementById('opp-name-display').innerText = `کامپیوتر (قرمز)`;
+            
             POINTS.forEach(pt => {
                 const pDiv = document.createElement('div');
                 pDiv.className = 'point';
@@ -338,7 +338,7 @@ HTML_TEMPLATE = """
                 }
             });
 
-            // Smooth sliding pieces layer
+            // لایه کشویی مهره‌ها (Slide Transition)
             piecesLayer.innerHTML = '';
             POINTS.forEach(pt => {
                 const color = state.board[pt.id];
@@ -380,7 +380,7 @@ HTML_TEMPLATE = """
 
         function triggerWin(winnerName, pieceColor) {
             state.gameOver = true;
-            confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
+            confetti({ particleCount: 130, spread: 90, origin: { y: 0.6 } });
             
             document.getElementById('winner-text').innerHTML = `
                 🏆 <b>${winnerName}</b> با مهره <b>${pieceColor}</b> برنده این نبرد شد!<br><br>
@@ -432,37 +432,33 @@ HTML_TEMPLATE = """
                     if (state.board[id] === null) {
                         const fromPt = state.selectedPoint;
                         
-                        // Check back move restriction
-                        if (state.lastBrokenMillBlue && state.lastBrokenMillBlue.from === id && state.lastBrokenMillBlue.to === fromPt) {
-                            setStatus("🚫 بازگشت به قطار قبلی مجاز نیست! ترکیب جدید بسازید.");
-                            state.selectedPoint = null;
-                            updateUI();
-                            return;
-                        }
-
-                        // Temporarily break existing mill tracking for this piece
-                        MILLS.forEach(m => {
-                            if (m.includes(fromPt)) {
-                                let key = m.slice().sort().join('-');
-                                let idx = state.formedMillsBlue.indexOf(key);
-                                if (idx !== -1) {
-                                    state.formedMillsBlue.splice(idx, 1);
-                                    state.lastBrokenMillBlue = { millKey: key, from: fromPt, to: id };
-                                }
-                            }
-                        });
-
+                        // انجام جابه‌جایی موقت
                         state.board[id] = 'blue';
                         state.board[fromPt] = null;
                         
-                        const formedMill = getFormedMill(id, 'blue');
-                        state.selectedPoint = null;
-
+                        let formedMill = checkNewMill(id, 'blue');
+                        
                         if (formedMill) {
+                            let millKey = formedMill.slice().sort().join('-');
+                            // بررسی قانون قفل ساخت قطار تکراری
+                            if (state.disabledMillsBlue.includes(millKey)) {
+                                // بازگرداندن حرکت
+                                state.board[fromPt] = 'blue';
+                                state.board[id] = null;
+                                state.selectedPoint = null;
+                                setStatus("🚫 ساخت مجدد این قطار مجاز نیست! ترکیب جدید بسازید.");
+                                updateUI();
+                                return;
+                            }
+
+                            // قطار مجاز است؛ ثبت قفل قطارهای قبلی
+                            state.disabledMillsBlue.push(millKey);
                             state.isRemoving = true;
                             state.highlightedMill = formedMill;
+                            state.selectedPoint = null;
                             setStatus("🔥 قطار جدید ساخته شد! یکی از مهره‌های قرمز را بسوزانید.");
                         } else {
+                            state.selectedPoint = null;
                             if (!checkWinCondition()) {
                                 switchTurn();
                             }
@@ -475,22 +471,13 @@ HTML_TEMPLATE = """
             updateUI();
         }
 
-        function getFormedMill(ptId, color) {
+        function checkNewMill(ptId, color) {
             for (let mill of MILLS) {
                 if (mill.includes(ptId) && mill.every(p => state.board[p] === color)) {
-                    let millKey = mill.slice().sort().join('-');
-                    let formedList = color === 'blue' ? state.formedMillsBlue : state.formedMillsRed;
-                    if (!formedList.includes(millKey)) {
-                        formedList.push(millKey);
-                        return mill;
-                    }
+                    return mill;
                 }
             }
             return null;
-        }
-
-        function checkNewMill(ptId, color) {
-            return getFormedMill(ptId, color) !== null;
         }
 
         function checkPhase() {
@@ -543,11 +530,14 @@ HTML_TEMPLATE = """
                         for (let t of emptyPoints) {
                             state.board[f] = null;
                             state.board[t] = 'red';
-                            let formedMill = getFormedMill(t, 'red');
-                            if (formedMill) {
+                            let formedMill = checkNewMill(t, 'red');
+                            let millKey = formedMill ? formedMill.slice().sort().join('-') : null;
+
+                            if (formedMill && !state.disabledMillsRed.includes(millKey)) {
                                 moved = true;
+                                state.disabledMillsRed.push(millKey);
                                 state.highlightedMill = formedMill;
-                                setStatus("🤖 کامپیوتر یک قطار ساخت!");
+                                setStatus("🤖 کامپیوتر قطار ساخت!");
                                 updateUI();
 
                                 setTimeout(() => {
@@ -556,6 +546,7 @@ HTML_TEMPLATE = """
                                         let killTarget = bluePiecesOnBoard[Math.floor(Math.random() * bluePiecesOnBoard.length)];
                                         state.board[killTarget] = null;
                                         state.killedBlue++;
+                                        setStatus(`🤖 کامپیوتر مهره شما را سوزاند!`);
                                     }
                                     state.highlightedMill = [];
                                     checkPhase();
@@ -601,9 +592,8 @@ HTML_TEMPLATE = """
                 isRemoving: false,
                 killedBlue: 0,
                 killedRed: 0,
-                formedMillsBlue: [],
-                formedMillsRed: [],
-                lastBrokenMillBlue: null,
+                disabledMillsBlue: [],
+                disabledMillsRed: [],
                 highlightedMill: [],
                 gameOver: false
             };
@@ -622,7 +612,7 @@ def index():
     return render_template_string(HTML_TEMPLATE)
 
 # ==========================================
-# 2. TELEGRAM BOT
+# 2. TELEGRAM BOT (Fix Room System)
 # ==========================================
 TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 WEBAPP_URL = os.getenv("WEBAPP_URL", "https://game-nawid.onrender.com")
@@ -633,27 +623,12 @@ user_states = {}
 
 WIN_COMBOS = [(0,1,2), (3,4,5), (6,7,8), (0,3,6), (1,4,7), (2,5,8), (0,4,8), (2,4,6)]
 
-def get_serekak_keyboard(board, selected=None):
-    keyboard = []
-    symbols = {'': '⬜', 'X': '❌', 'O': '⭕'}
-    for r in range(3):
-        row = []
-        for c in range(3):
-            idx = r * 3 + c
-            text = symbols[board[idx]]
-            if selected == idx:
-                text = "🟡"
-            row.append(InlineKeyboardButton(text, callback_data=f"serekak_{idx}"))
-        keyboard.append(row)
-    keyboard.append([InlineKeyboardButton("❌ انصراف و خروج", callback_data="serekak_exit")])
-    return InlineKeyboardMarkup(keyboard)
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     app_url = WEBAPP_URL.strip()
     
     keyboard = [
-        [InlineKeyboardButton("⚔️ نبرد هیجان‌انگیز سه‌رگک (با کامپیوتر)", callback_data="play_serekak_ai")],
-        [InlineKeyboardButton("👑 نبرد حماسی نه‌رگک (تخته آنلاین)", web_app=WebAppInfo(url=app_url))],
+        [InlineKeyboardButton("⚔️ نبرد سه‌رگک (با کامپیوتر)", callback_data="play_serekak_ai")],
+        [InlineKeyboardButton("👑 نبرد نه‌رگک (با کامپیوتر)", web_app=WebAppInfo(url=app_url))],
         [InlineKeyboardButton("👥 ساخت / ورود به اتاق بازی با دوستان", callback_data="friend_room_menu")],
         [InlineKeyboardButton("⚙️ تنظیمات", callback_data="settings"), InlineKeyboardButton("📖 راهنمای بازی", callback_data="guide")],
         [InlineKeyboardButton("ℹ️ درباره ربات", callback_data="about")]
@@ -672,97 +647,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     data = query.data
 
-    if data == "play_serekak_ai":
-        serekak_games[user_id] = {
-            'board': [''] * 9,
-            'x_count': 0,
-            'o_count': 0,
-            'phase': 'place',
-            'selected': None
-        }
-        await query.message.reply_text(
-            "⚔️ **بازی سه‌رگک:**\n\n🔹 **مرحله ۱:** مهره‌های خود (❌) را در خانه‌های خالی بنشانید.",
-            reply_markup=get_serekak_keyboard(serekak_games[user_id]['board']),
-            parse_mode='Markdown'
-        )
-
-    elif data.startswith("serekak_"):
-        if data == "serekak_exit":
-            serekak_games.pop(user_id, None)
-            await query.edit_message_text("از بازی خارج شدی. /start را بزن.")
-            return
-
-        idx = int(data.split("_")[1])
-        game = serekak_games.get(user_id)
-        if not game:
-            return
-
-        board = game['board']
-
-        if game['phase'] == 'place':
-            if board[idx] == '':
-                board[idx] = 'X'
-                game['x_count'] += 1
-
-                if check_win(board, 'X'):
-                    await query.edit_message_text("🎉 **تبریک! شما برنده این نبرد شدید!**", reply_markup=get_serekak_keyboard(board), parse_mode='Markdown')
-                    serekak_games.pop(user_id, None)
-                    return
-
-                if game['o_count'] < 3:
-                    ai_idx = get_smart_ai_move(board)
-                    if ai_idx is not None:
-                        board[ai_idx] = 'O'
-                        game['o_count'] += 1
-
-                if check_win(board, 'O'):
-                    await query.edit_message_text("🤖 **هوش مصنوعی برنده شد!**", reply_markup=get_serekak_keyboard(board), parse_mode='Markdown')
-                    serekak_games.pop(user_id, None)
-                    return
-
-                if game['x_count'] == 3 and game['o_count'] == 3:
-                    game['phase'] = 'move'
-                    await query.edit_message_text(
-                        "🔄 **تمام مهره‌ها کاشته شدند!**\nحالا وارد **فاز جابه‌جایی** شدید.",
-                        reply_markup=get_serekak_keyboard(board),
-                        parse_mode='Markdown'
-                    )
-                    return
-
-                await query.edit_message_text("🎮 **نوبت شماست!** خانه خالی را انتخاب کنید.", reply_markup=get_serekak_keyboard(board), parse_mode='Markdown')
-
-        elif game['phase'] == 'move':
-            if game['selected'] is None:
-                if board[idx] == 'X':
-                    game['selected'] = idx
-                    await query.edit_message_text("🟡 **مهره انتخاب شد!** خانه مقصد را انتخاب کن:", reply_markup=get_serekak_keyboard(board, selected=idx), parse_mode='Markdown')
-            else:
-                if board[idx] == '':
-                    board[idx] = 'X'
-                    board[game['selected']] = ''
-                    game['selected'] = None
-
-                    if check_win(board, 'X'):
-                        await query.edit_message_text("🎉 **قطار کامل شد! شما برنده این میدان شدید!**", reply_markup=get_serekak_keyboard(board), parse_mode='Markdown')
-                        serekak_games.pop(user_id, None)
-                        return
-
-                    ai_from, ai_to = get_smart_ai_shift(board)
-                    if ai_from is not None and ai_to is not None:
-                        board[ai_from] = ''
-                        board[ai_to] = 'O'
-
-                    if check_win(board, 'O'):
-                        await query.edit_message_text("🤖 **هوش مصنوعی برنده شد!**", reply_markup=get_serekak_keyboard(board), parse_mode='Markdown')
-                        serekak_games.pop(user_id, None)
-                        return
-
-                    await query.edit_message_text("🎮 **نوبت شماست!** مهره را جابه‌جا کنید.", reply_markup=get_serekak_keyboard(board), parse_mode='Markdown')
-                elif board[idx] == 'X':
-                    game['selected'] = idx
-                    await query.edit_message_text("🟡 **مهره جدید انتخاب شد!** خانه مقصد را بزنید:", reply_markup=get_serekak_keyboard(board, selected=idx), parse_mode='Markdown')
-
-    elif data == "friend_room_menu":
+    if data == "friend_room_menu":
         kb = [
             [InlineKeyboardButton("➕ ساخت اتاق جدید", callback_data="create_room")],
             [InlineKeyboardButton("🔑 ورود با کد اتاق", callback_data="join_room")],
@@ -773,34 +658,27 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "create_room":
         room_code = str(random.randint(1000, 9999))
         rooms[room_code] = {'host': user_id, 'guest': None}
-        await query.message.reply_text(f"🔑 **اتاق ساخته شد!**\nکد اتاق شما: `{room_code}`\nاین کد را به دوستت بده تا وارد اتاق شود.", parse_mode='Markdown')
+        await query.message.reply_text(
+            f"🔑 **اتاق شما ساخته شد!**\nکد اتاق: `{room_code}`\n\nاین کد را به دوستت بده تا وارد کند.",
+            parse_mode='Markdown'
+        )
 
     elif data == "join_room":
         user_states[user_id] = 'awaiting_room_code'
         await query.message.reply_text("لطفاً کد ۴ رقمی اتاق دوستت رو بفرست:")
 
+    elif data == "play_serekak_ai":
+        serekak_games[user_id] = {'board': [''] * 9, 'x_count': 0, 'o_count': 0, 'phase': 'place', 'selected': None}
+        await query.message.reply_text("⚔️ **بازی سه‌رگک با کامپیوتر شروع شد!**", parse_mode='Markdown')
+
     elif data == "guide":
-        guide_text = (
-            "📖 **راهنمای بازی‌ها:**\n\n"
-            "⚔️ **بازی سه‌رگک:**\n"
-            "۳ مهره را جابه‌جا کنید تا قطار ساخته و برنده شوید.\n\n"
-            "👑 **بازی نه‌رگک:**\n"
-            "در فاز جابه‌جایی با ساخت هر قطار جدید، یک مهره حریف را می‌سوزانید. زمانی که مهره‌های حریف به ۲ برسد، برنده اعلام می‌شوید!"
-        )
-        await query.message.reply_text(guide_text, parse_mode='Markdown')
+        await query.message.reply_text("📖 **راهنمای بازی‌ها:**\nدر فاز جابه‌جایی با هر قطار جدید، یک مهره حریف را بسوزانید.")
 
     elif data == "settings":
-        await query.message.reply_text("⚙️ **تنظیمات:**\nدرجه سختی هوش مصنوعی روی **سطح بسیار سخت** تنظیم شده است.")
+        await query.message.reply_text("⚙️ **تنظیمات:** درجه سختی هوش مصنوعی روی **حالت سخت** تنظیم شده است.")
 
     elif data == "about":
-        about_text = (
-            "🤖 **درباره ربات:**\n\n"
-            "خوش آمدی رفیق! این ربات با هدف ایجاد یک فضای کل‌کل و سرگرمی و خوش‌گذرانی آنلاین و رقابت با رفیقات و هوش مصنوعی طراحی شده بزن بترکون😂🔥\n\n"
-            "طراحی و ساخت بات\n"
-            "ldCactuc = نــوید\n"
-            "@cactuc580"
-        )
-        await query.message.reply_text(about_text)
+        await query.message.reply_text("🤖 **درباره ربات:**\nطراحی شده توسط @cactuc580")
 
     elif data == "back_main":
         await start(update, context)
@@ -808,56 +686,24 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     text = update.message.text.strip()
+    app_url = WEBAPP_URL.strip()
 
     if user_states.get(user_id) == 'awaiting_room_code':
         if text in rooms:
             rooms[text]['guest'] = user_id
             user_states.pop(user_id, None)
-            await update.message.reply_text(f"✅ با موفقیت وارد اتاق `{text}` شدید! بازی آنلاین شروع شد.", parse_mode='Markdown')
+            
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎮 ورود به تخته آنلاین (دو نفره)", web_app=WebAppInfo(url=app_url))]
+            ])
+            
+            await update.message.reply_text(
+                f"✅ **با موفقیت وارد اتاق {text} شدید!**\nروی دکمه زیر کلیک کنید تا بازی دو نفره آنلاین باز شود:",
+                reply_markup=kb,
+                parse_mode='Markdown'
+            )
         else:
             await update.message.reply_text("❌ کد اتاق اشتباه است. دوباره وارد کنید:")
-
-def check_win(b, p):
-    return any(b[x] == b[y] == b[z] == p for x, y, z in WIN_COMBOS)
-
-def get_smart_ai_move(board):
-    for i in range(9):
-        if board[i] == '':
-            board[i] = 'O'
-            if check_win(board, 'O'):
-                return i
-            board[i] = ''
-
-    for i in range(9):
-        if board[i] == '':
-            board[i] = 'X'
-            if check_win(board, 'X'):
-                board[i] = ''
-                return i
-            board[i] = ''
-
-    if board[4] == '':
-        return 4
-
-    empty = [i for i, v in enumerate(board) if v == '']
-    return random.choice(empty) if empty else None
-
-def get_smart_ai_shift(board):
-    o_indices = [i for i, v in enumerate(board) if v == 'O']
-    empty_indices = [i for i, v in enumerate(board) if v == '']
-
-    for f in o_indices:
-        for t in empty_indices:
-            board[f] = ''
-            board[t] = 'O'
-            if check_win(board, 'O'):
-                return f, t
-            board[f] = 'O'
-            board[t] = ''
-
-    if o_indices and empty_indices:
-        return random.choice(o_indices), random.choice(empty_indices)
-    return None, None
 
 if __name__ == '__main__':
     import threading
