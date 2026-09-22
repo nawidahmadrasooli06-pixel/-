@@ -9,20 +9,20 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# ساخت وب‌سرور برای زنده ماندن در Render
+# ساخت وب‌سرور برای آنلاین ماندن در Render
 web_app = Flask('')
 
 @web_app.route('/')
 def home():
-    return "Bot is alive!"
+    return "Bot is alive and running!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host='0.0.0.0', port=port)
 
-# حافظه بازی‌ها و اتاق‌ها
-rooms = {}  # room_code: {"players": [], "board": [...], "turn": user_id}
-ai_games = {} # user_id: {"board": [...], "turn": "user"}
+# حافظه بازی‌ها
+rooms = {}
+ai_games = {}
 
 ABOUT_TEXT_FA = (
     "🎮 **ربات بازی هیجان‌انگیز**\n\n"
@@ -32,17 +32,25 @@ ABOUT_TEXT_FA = (
     "📌 *این ربات گیمینگ صرفاً برای سرگرمی و خوش‌گذشتن شما عزیزان ساخته شده است. امیدوارم نهایت لذت را ببرید! ❤️*"
 )
 
+RULES_NAHREGAK = (
+    "📜 **راهنمای بازی نهره‌گک (دوز ۹ تایی سنتی):**\n\n"
+    "۱. هر بازیکن با ۹ مهره بازی را شروع می‌کند.\n"
+    "۲. هدف این است که با چیدن ۳ مهره در یک خط، یک **قطار** بسازید.\n"
+    "۳. با هر بار ساخت قطار، می‌توانید یکی از مهره‌های حریف را بسوزانید!\n"
+    "۴. بازیکن زمانی می‌بازد که تعداد مهره‌هایش به کمتر از ۳ برسد."
+)
+
 def get_main_menu():
     keyboard = [
-        [InlineKeyboardButton("🤖 بازی با ربات (تک‌نفره)", callback_data="play_ai")],
+        [InlineKeyboardButton("🎮 بازی دوز سریع (۳x۳)", callback_data="play_ai_3")],
+        [InlineKeyboardButton("🏆 بازی نهره‌گک (۹ مهره‌ای سنتی)", callback_data="play_nahregak")],
         [InlineKeyboardButton("🔗 بازی با دوستان (کد اتاق)", callback_data="play_friends_menu")],
         [InlineKeyboardButton("⚙️ تنظیمات", callback_data="settings"), InlineKeyboardButton("🏆 جدول برترین‌ها", callback_data="leaderboard")],
         [InlineKeyboardButton("درباره ربات ℹ️", callback_data="about")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
-def render_board(board, prefix="cell"):
-    # ساخت صفحه بازی دوز (۳x۳)
+def render_board_3x3(board, prefix="cell"):
     keyboard = []
     for i in range(0, 9, 3):
         row = []
@@ -56,7 +64,7 @@ def render_board(board, prefix="cell"):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    welcome_msg = f"سلام {user.first_name} عزیز! 👋\nبه ربات گیمینگ خوش آمدی. یک حالت بازی را انتخاب کن:"
+    welcome_msg = f"سلام {user.first_name} عزیز! 👋\nبه ربات گیمینگ نوید خوش آمدی. یک حالت بازی را انتخاب کن:"
     await update.message.reply_text(welcome_msg, reply_markup=get_main_menu())
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -73,6 +81,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["awaiting_code"] = False
         await query.edit_message_text("منوی اصلی بازی:", reply_markup=get_main_menu())
 
+    elif data == "play_nahregak":
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🎲 شروع بازی ۹ مهره‌ای با ربات", callback_data="play_ai_9")],
+            [InlineKeyboardButton("🔙 بازگشت", callback_data="main_menu")]
+        ])
+        await query.edit_message_text(RULES_NAHREGAK, reply_markup=kb, parse_mode="Markdown")
+
     elif data == "play_friends_menu":
         kb = [
             [InlineKeyboardButton("➕ ساخت اتاق جدید", callback_data="create_room")],
@@ -82,15 +97,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🎮 **بخش بازی با دوستان**\nیکی از گزینه‌ها را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
 
     elif data == "create_room":
-        # ساخت کد ۴ رقمی شیک
         room_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
         rooms[room_code] = {"host": user_id, "guest": None, "board": [" "] * 9}
         
         msg = (
             f"🏰 **اتاق بازی شما ساخته شد!**\n\n"
             f"🔑 کد اتاق: `{room_code}`\n\n"
-            f"این کد ۴ رقمی را برای دوستت بفرست.\n"
-            f"دوستت باید در بخش «ورود با کد اتاق» این کد را وارد کند تا بازی شروع شود!"
+            f"این کد ۴ رقمی را برای دوستت بفرست تا وارد اتاق شود!"
         )
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="play_friends_menu")]])
         await query.edit_message_text(msg, reply_markup=kb, parse_mode="Markdown")
@@ -98,12 +111,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "join_room_prompt":
         context.user_data["awaiting_code"] = True
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data="play_friends_menu")]])
-        await query.edit_message_text("🔑 **لطفاً کد ۴ رقمی اتاق را بفرستید:**\n(فرقی نمی‌کند حروف بزرگ باشد یا کوچک)", reply_markup=kb, parse_mode="Markdown")
+        await query.edit_message_text("🔑 **لطفاً کد ۴ رقمی اتاق را بفرستید:**", reply_markup=kb, parse_mode="Markdown")
 
-    # شروع بازی با هوش مصنوعی (تک‌نفره)
-    elif data == "play_ai":
+    # بازی ۳x۳
+    elif data in ["play_ai_3", "play_ai_9"]:
         ai_games[user_id] = {"board": [" "] * 9, "turn": "user"}
-        await query.edit_message_text("🎮 **بازی دوز با هوش مصنوعی**\nنوبت شماست (❌):", reply_markup=render_board(ai_games[user_id]["board"], "ai_cell"))
+        msg_text = "🎮 **نوبت شماست!** (مهره شما: 🟦 / مهره هوش مصنوعی: 🟥)"
+        await query.edit_message_text(msg_text, reply_markup=render_board_3x3(ai_games[user_id]["board"], "ai_cell"))
 
     elif data.startswith("ai_cell_"):
         idx = int(data.split("_")[2])
@@ -111,34 +125,57 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not game or game["board"][idx] != " ":
             return
 
-        # حرکت کاربر
-        game["board"][idx] = "❌"
+        # حرکت کاربر (مهره آبی)
+        game["board"][idx] = "🟦"
         
-        # بررسی برد کاربر
-        if check_winner(game["board"]) == "❌":
-            await query.edit_message_text("🎉 **تبریک! شما هوش مصنوعی را شکست دادید!** 🏆", reply_markup=render_board(game["board"], "done"))
+        if check_winner(game["board"]) == "🟦":
+            end_kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 شروع مجدد بازی (/start)", callback_data="main_menu")]
+            ])
+            await query.edit_message_text(
+                "🎉🔥 **پیروزی عالی! شما برنده این نبرد شدید!** 🔥🎉\n\n"
+                "دمت گرم! هوش مصنوعی را با یک قطار فوق‌العاده شکست دادی. 💪\n"
+                "برای بازی دوباره، دکمه زیر را لمس کنید:",
+                reply_markup=end_kb,
+                parse_mode="Markdown"
+            )
             return
 
-        # حرکت هوش مصنوعی
+        # حرکت هوش مصنوعی (مهره قرمز)
         empty_cells = [i for i, val in enumerate(game["board"]) if val == " "]
         if empty_cells:
             ai_move = random.choice(empty_cells)
-            game["board"][ai_move] = "⭕"
+            game["board"][ai_move] = "🟥"
             
-            if check_winner(game["board"]) == "⭕":
-                await query.edit_message_text("🤖 **هوش مصنوعی برنده شد! دوباره تلاش کن.**", reply_markup=render_board(game["board"], "done"))
+            if check_winner(game["board"]) == "🟥":
+                end_kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔄 شروع مجدد بازی (/start)", callback_data="main_menu")]
+                ])
+                await query.edit_message_text(
+                    "🤖 **هوش مصنوعی این بار برنده شد!**\n\n"
+                    "اشکالی نداره، دوباره شانس خودت رو امتحان کن. 😉\n"
+                    "برای شروع مجدد روی دکمه زیر بزن:",
+                    reply_markup=end_kb,
+                    parse_mode="Markdown"
+                )
                 return
         else:
-            await query.edit_message_text("🤝 **بازی مساوی شد!**", reply_markup=render_board(game["board"], "done"))
+            end_kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 شروع مجدد بازی (/start)", callback_data="main_menu")]
+            ])
+            await query.edit_message_text(
+                "🤝 **یک نبرد برابر! بازی مساوی شد.**\n\nبرای بازی دوباره روی دکمه زیر کلیک کنید:",
+                reply_markup=end_kb,
+                parse_mode="Markdown"
+            )
             return
 
-        await query.edit_message_text("🎮 **بازی دوز با هوش مصنوعی**\nنوبت شماست (❌):", reply_markup=render_board(game["board"], "ai_cell"))
+        await query.edit_message_text(
+            "🎮 **نوبت شماست!** (مهره شما: 🟦 / مهره هوش مصنوعی: 🟥)",
+            reply_markup=render_board_3x3(game["board"], "ai_cell")
+        )
 
-    else:
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="main_menu")]])
-        await query.edit_message_text("این بخش به زودی فعال می‌شود!", reply_markup=kb)
-
-# دریافت متن (کد ۴ رقمی) از کاربر
+# دریافت کد ۴ رقمی
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("awaiting_code"):
         code = update.message.text.strip().upper()
@@ -146,7 +183,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["awaiting_code"] = False
             await update.message.reply_text(f"✅ با موفقیت وارد اتاق `{code}` شدید! منتظر شروع...", parse_mode="Markdown")
         else:
-            await update.message.reply_text("❌ کد وارد شده معتبر نیست! دوباره تلاش کنید یا انصراف دهید.")
+            await update.message.reply_text("❌ کد وارد شده معتبر نیست! دوباره تلاش کنید.")
 
 def check_winner(b):
     lines = [(0,1,2), (3,4,5), (6,7,8), (0,3,6), (1,4,7), (2,5,8), (0,4,8), (2,4,6)]
