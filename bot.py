@@ -304,7 +304,6 @@ HTML_TEMPLATE = """
 """
 
 @app.route('/')
-@app.route('/game')
 def index():
     return render_template_string(HTML_TEMPLATE)
 
@@ -312,7 +311,7 @@ def index():
 # 2. TELEGRAM BOT
 # ==========================================
 TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-WEBAPP_URL = os.getenv("WEBAPP_URL", "https://your-app-name.onrender.com")
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://game-nawid.onrender.com")
 
 serekak_games = {}
 rooms = {}
@@ -336,15 +335,15 @@ def get_serekak_keyboard(board, selected=None):
     return InlineKeyboardMarkup(keyboard)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Ensure URL is pointing correctly
-    app_url = WEBAPP_URL.rstrip('/') + '/game'
+    # Direct Render HTTPS URL
+    app_url = WEBAPP_URL.rstrip('/')
     
     keyboard = [
         [InlineKeyboardButton("⚔️ نبرد هیجان‌انگیز سه‌رگک (با کامپیوتر)", callback_data="play_serekak_ai")],
         [InlineKeyboardButton("👑 نبرد حماسی نه‌رگک (تخته آنلاین)", web_app=WebAppInfo(url=app_url))],
         [InlineKeyboardButton("👥 ساخت / ورود به اتاق بازی با دوستان", callback_data="friend_room_menu")],
         [InlineKeyboardButton("⚙️ تنظیمات", callback_data="settings"), InlineKeyboardButton("📖 راهنمای بازی", callback_data="guide")],
-        [InlineKeyboardButton("ℹ️ درباره سازنده (نوید)", callback_data="about")]
+        [InlineKeyboardButton("ℹ️ درباره ربات", callback_data="about")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     msg = "سلام رفیق! 👑 به مرکز بازی‌های استراتژیک خوش آمدی.\nلطفاً یکی از گزینه‌های زیر را انتخاب کن:"
@@ -486,7 +485,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("⚙️ **تنظیمات:**\nسطح هوش مصنوعی روی حالت **پیشرفته/قوی** فعال است.")
 
     elif data == "about":
-        await query.message.reply_text("سازنده و توسعه‌دهنده ربات: نوید عزیز ❤️")
+        await query.message.reply_text("🤖 **درباره ربات:**\nاین ربات هوشمند جهت اجرای بازی‌های استراتژیک سنتی (سه‌رگک و نه‌رگک) به‌صورت آنلاین و هوش مصنوعی طراحی و اجرا شده است.\n\nطراح و توسعه‌دهنده: نوید ❤️")
 
     elif data == "back_main":
         await start(update, context)
@@ -506,9 +505,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def check_win(b, p):
     return any(b[x] == b[y] == b[z] == p for x, y, z in WIN_COMBOS)
 
-# High Difficulty AI Logic
 def get_smart_ai_move(board):
-    # 1. Win if possible
     for i in range(9):
         if board[i] == '':
             board[i] = 'O'
@@ -516,7 +513,6 @@ def get_smart_ai_move(board):
                 return i
             board[i] = ''
 
-    # 2. Block player's win
     for i in range(9):
         if board[i] == '':
             board[i] = 'X'
@@ -525,11 +521,9 @@ def get_smart_ai_move(board):
                 return i
             board[i] = ''
 
-    # 3. Take center if available
     if board[4] == '':
         return 4
 
-    # 4. Take random empty
     empty = [i for i, v in enumerate(board) if v == '']
     return random.choice(empty) if empty else None
 
@@ -537,7 +531,6 @@ def get_smart_ai_shift(board):
     o_indices = [i for i, v in enumerate(board) if v == 'O']
     empty_indices = [i for i, v in enumerate(board) if v == '']
 
-    # Check winning move
     for f in o_indices:
         for t in empty_indices:
             board[f] = ''
@@ -547,24 +540,13 @@ def get_smart_ai_shift(board):
             board[f] = 'O'
             board[t] = ''
 
-    # Check blocking move
-    x_indices = [i for i, v in enumerate(board) if v == 'X']
-    for f in o_indices:
-        for t in empty_indices:
-            board[f] = ''
-            board[t] = 'O'
-            # See if blocks
-            board[f] = 'O'
-            board[t] = ''
-
-    # Random valid move
     if o_indices and empty_indices:
         return random.choice(o_indices), random.choice(empty_indices)
     return None, None
 
 if __name__ == '__main__':
     import threading
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 10000))
     threading.Thread(target=lambda: app.run(host='0.0.0.0', port=port, debug=False)).start()
 
     application = Application.builder().token(TOKEN).build()
