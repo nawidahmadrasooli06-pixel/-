@@ -2,14 +2,14 @@ import os
 import logging
 from threading import Thread
 from flask import Flask, render_template_string
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo, BotCommand
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 app_web = Flask(__name__)
 
-# کد صفحه گرافیکی بازی (HTML/CSS/JS)
+# رابط گرافیکی پیشرفته، مینیمال و انیمیشنی (Mini App)
 HTML_GAME = """
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
@@ -18,95 +18,123 @@ HTML_GAME = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>بازی نهره‌گک</title>
     <style>
+        * { box-sizing: border-box; user-select: none; }
         body {
-            background-color: #1e1e2e;
-            color: #ffffff;
-            font-family: Tahoma, sans-serif;
+            background: linear-gradient(135deg, #0f172a, #1e293b);
+            color: #f8fafc;
+            font-family: 'Segoe UI', Tahoma, sans-serif;
             text-align: center;
             margin: 0;
-            padding: 10px;
-            touch-action: none;
+            padding: 12px;
+            overflow: hidden;
         }
-        h3 { margin: 5px 0; color: #89b4fa; }
+        .header-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #38bdf8;
+            margin-bottom: 8px;
+        }
         #status-bar {
-            background: #313244;
-            padding: 8px;
-            border-radius: 8px;
-            margin-bottom: 10px;
-            font-size: 14px;
+            background: rgba(30, 41, 59, 0.8);
+            border: 1px solid #334155;
+            padding: 8px 12px;
+            border-radius: 10px;
+            font-size: 13px;
+            color: #e2e8f0;
+            margin-bottom: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         }
-        #pouch {
-            display: flex;
-            justify-content: center;
-            gap: 8px;
-            min-height: 45px;
-            background: #45475a;
-            padding: 5px;
-            border-radius: 8px;
-            margin-bottom: 15px;
-        }
-        .piece {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            display: inline-block;
-            cursor: grab;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        }
-        .piece.blue { background: radial-gradient(circle at 10px 10px, #89dceb, #1e66f5); }
-        .piece.red { background: radial-gradient(circle at 10px 10px, #f38ba8, #d20f39); }
         
-        #board-container {
-            position: relative;
-            width: 320px;
-            height: 320px;
-            margin: 0 auto;
-            background: #181825;
+        /* مخزن مهره‌ها */
+        .pouches-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            max-width: 360px;
+            margin: 0 auto 10px auto;
+            background: rgba(15, 23, 42, 0.6);
+            padding: 8px 12px;
             border-radius: 12px;
-            border: 2px solid #585b70;
+            border: 1px solid #1e293b;
+        }
+        .pouch-box {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            max-width: 140px;
+        }
+        
+        /* مهره‌های ریزتر و شیک */
+        .piece {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+            transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+        }
+        .piece.blue { background: radial-gradient(circle at 5px 5px, #38bdf8, #0284c7); }
+        .piece.red { background: radial-gradient(circle at 5px 5px, #f43f5e, #be123c); }
+
+        /* تخته بزرگ و مینیمال */
+        #board-wrapper {
+            position: relative;
+            width: 350px;
+            height: 350px;
+            margin: 0 auto;
+            background: #090d16;
+            border-radius: 20px;
+            border: 2px solid #334155;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            padding: 10px;
         }
         svg { width: 100%; height: 100%; }
-        line, rect { stroke: #cdd6f4; stroke-width: 2; fill: none; }
+        line, rect { stroke: #64748b; stroke-width: 2; fill: none; }
+        
+        /* نقطه‌های ریز دکمه‌ای */
         circle.spot {
-            fill: #a6adc8;
-            r: 5;
+            fill: #38bdf8;
+            r: 6;
             cursor: pointer;
-            transition: 0.2s;
+            transition: transform 0.2s, fill 0.2s;
         }
-        circle.spot:hover { fill: #f9e2af; r: 8; }
-        circle.center-burn {
-            fill: #f38ba8;
-            opacity: 0.2;
-            stroke: #f38ba8;
+        circle.spot:hover {
+            fill: #facc15;
+            r: 8;
+        }
+        
+        /* دایره مرکز سوخته‌ها */
+        circle.center-burn-ring {
+            fill: rgba(244, 63, 94, 0.08);
+            stroke: #f43f5e;
             stroke-dasharray: 4;
+            stroke-width: 1.5;
         }
     </style>
 </head>
 <body>
 
-    <h3>🎯 بازی نهره‌گک (تخته سنتی)</h3>
-    <div id="status-bar">نوبت شماست! مهره آبی را بکشید و روی نقطه بگذارید.</div>
+    <div class="header-title">🎲 تخته سنتی نهره‌گک (۲ نفره)</div>
+    <div id="status-bar">💡 رفیق! روی هر نقطه‌ای که می‌خوای مهره‌ت بذاری کلیک کن.</div>
 
-    <!-- مخزن مهره‌های قابل کشیدن -->
-    <div id="pouch">
-        <div class="piece blue" draggable="true" id="p1"></div>
-        <div class="piece blue" draggable="true" id="p2"></div>
-        <div class="piece blue" draggable="true" id="p3"></div>
-        <div class="piece blue" draggable="true" id="p4"></div>
-        <div class="piece blue" draggable="true" id="p5"></div>
-        <div class="piece blue" draggable="true" id="p6"></div>
-        <div class="piece blue" draggable="true" id="p7"></div>
-        <div class="piece blue" draggable="true" id="p8"></div>
-        <div class="piece blue" draggable="true" id="p9"></div>
+    <!-- مخزن مهره‌های آبی (شما) و قرمز (حریف) -->
+    <div class="pouches-container">
+        <div>
+            <div style="font-size: 11px; margin-bottom:3px; color:#38bdf8;">دست شما (آبی):</div>
+            <div class="pouch-box" id="pouch-blue"></div>
+        </div>
+        <div>
+            <div style="font-size: 11px; margin-bottom:3px; color:#f43f5e;">دست حریف (قرمز):</div>
+            <div class="pouch-box" id="pouch-red"></div>
+        </div>
     </div>
 
-    <!-- تخته بازی با خطوط واقعی و نقطه‌های ریز -->
-    <div id="board-container">
-        <svg viewBox="0 0 300 300">
+    <!-- تخته اصلی با انیمیشن کشویی -->
+    <div id="board-wrapper">
+        <svg viewBox="0 0 300 300" id="svg-board">
             <!-- ۳ مربع اصلی -->
-            <rect x="20" y="20" width="260" height="260" />
-            <rect x="60" y="60" width="180" height="180" />
-            <rect x="100" y="100" width="100" height="100" />
+            <rect x="20" y="20" width="260" height="260" rx="6" />
+            <rect x="60" y="60" width="180" height="180" rx="4" />
+            <rect x="100" y="100" width="100" height="100" rx="2" />
 
             <!-- خطوط رابط وسط -->
             <line x1="150" y1="20" x2="150" y2="100" />
@@ -114,10 +142,10 @@ HTML_GAME = """
             <line x1="20" y1="150" x2="100" y2="150" />
             <line x1="200" y1="150" x2="280" y2="150" />
 
-            <!-- دایره مرکز (خانه سوخته‌ها) -->
-            <circle cx="150" cy="150" r="25" class="center-burn" />
+            <!-- خانه مرکز (مهره‌های سوخته) -->
+            <circle cx="150" cy="150" r="28" class="center-burn-ring" />
 
-            <!-- ۲۴ نقطه ریز بازی -->
+            <!-- ۲۴ نقطه ریز اصلی روی تخته -->
             <!-- مربع بیرونی -->
             <circle cx="20" cy="20" class="spot" data-id="0" />
             <circle cx="150" cy="20" class="spot" data-id="1" />
@@ -151,24 +179,37 @@ HTML_GAME = """
     </div>
 
     <script>
-        // قابلیت Drag & Drop ساده
-        let draggedPiece = null;
-        document.querySelectorAll('.piece').forEach(p => {
-            p.addEventListener('dragstart', (e) => {
-                draggedPiece = e.target;
-            });
-        });
+        // ساخت ۹ مهره برای هر دو طرف در مخزن
+        const pBlue = document.getElementById('pouch-blue');
+        const pRed = document.getElementById('pouch-red');
 
+        for(let i=0; i<9; i++){
+            let b = document.createElement('div');
+            b.className = 'piece blue';
+            b.id = 'blue-' + i;
+            pBlue.appendChild(b);
+
+            let r = document.createElement('div');
+            r.className = 'piece red';
+            r.id = 'red-' + i;
+            pRed.appendChild(r);
+        }
+
+        let blueCount = 0;
+
+        // کلیک روی نقطه‌ها برای سریدن آروم مهره
         document.querySelectorAll('.spot').forEach(spot => {
-            spot.addEventListener('dragover', (e) => e.preventDefault());
-            spot.addEventListener('drop', (e) => {
-                e.preventDefault();
-                if(draggedPiece) {
-                    spot.style.fill = "#1e66f5";
-                    spot.style.r = "10";
-                    draggedPiece.remove();
-                    draggedPiece = null;
-                    document.getElementById('status-bar').innerText = "آفرین! حرکت بعد رو بزن.";
+            spot.addEventListener('click', function() {
+                if(blueCount < 9 && this.getAttribute('data-filled') !== 'true') {
+                    let piece = document.getElementById('blue-' + blueCount);
+                    if(piece) {
+                        this.setAttribute('data-filled', 'true');
+                        this.style.fill = "#38bdf8";
+                        this.style.r = "8";
+                        piece.style.opacity = "0.3";
+                        blueCount++;
+                        document.getElementById('status-bar').innerText = "حرکت عالی بود! نوبت مهره بعدیه.";
+                    }
                 }
             });
         });
@@ -189,19 +230,60 @@ def run_web():
     port = int(os.environ.get("PORT", 8080))
     app_web.run(host='0.0.0.0', port=port)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # آدرس وب‌اپ بر روی سرور Render
+# متن بخش درباره سازنده
+ABOUT_TEXT = (
+    "🎮 **ربات بازی هیجان‌انگیز نهره‌گک**\n\n"
+    "👨‍💻 **طراحی و توسعه‌یافته توسط:** 〘Cactuc = نــوید\n"
+    "🆔 @cactuc580\n\n"
+    "💡 *اگر نظر، پیشنهاد یا ایده‌ای برای بهتر شدن بازی داشتید، می‌توانید با من در میان بگذارید.*\n\n"
+    "📌 *این ربات گیمینگ صرفاً برای سرگرمی و خوش‌گذشتن شما عزیزان ساخته شده است. امیدوارم نهایت لذت را ببرید! ❤️*"
+)
+
+# منوی کامل و چندگزینه‌ای اصیل تلگرام
+def get_full_main_menu():
     web_app_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'game-nawid.onrender.com')}/game"
     
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎮 باز کردن تخته بازی (گرافیکی و کشویی)", web_app=WebAppInfo(url=web_app_url))]
+    kb = [
+        [InlineKeyboardButton("🤖 بازی با ربات (تک‌نفره)", web_app=WebAppInfo(url=web_app_url))],
+        [InlineKeyboardButton("🌐 بازی آنلاین کشوری", callback_data="online_play"), InlineKeyboardButton("🔗 بازی با دوستان (کد / لینک)", callback_data="friend_play")],
+        [InlineKeyboardButton("🏆 جدول برترین‌ها", callback_data="leaderboard"), InlineKeyboardButton("⚙️ تنظیمات / Settings", callback_data="settings")],
+        [InlineKeyboardButton("ℹ️ درباره سازنده (نوید)", callback_data="about")]
+    ]
+    return InlineKeyboardMarkup(kb)
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "سلام رفیق! به منوی اصلی ربات بازی خوش اومدی. گزینه مورد نظرت رو انتخاب کن: 👇",
+        reply_markup=get_full_main_menu()
+    )
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    data = query.data
+
+    if data == "about":
+        await query.answer()
+        back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت به منو", callback_data="main_menu")]])
+        await query.edit_message_text(ABOUT_TEXT, reply_markup=back_btn, parse_mode="Markdown")
+
+    elif data == "main_menu":
+        await query.answer()
+        await query.edit_message_text("منوی اصلی بازی:", reply_markup=get_full_main_menu())
+
+    elif data in ["online_play", "friend_play", "leaderboard", "settings"]:
+        await query.answer("این بخش به‌زودی در آپدیت بعدی فعال میشه رفیق! 😉", show_alert=True)
+
+# ثبت دستور /start در کیبورد تلگرام
+async def post_init(application: Application):
+    await application.bot.set_my_commands([
+        BotCommand("start", "شروع مجدد و باز کردن منوی اصلی 🎮")
     ])
-    await update.message.reply_text("سلام نوید عزیز! برای بازی روی تخته واقعی و گرافیکی، روی دکمه زیر بزن 👇", reply_markup=kb)
 
 if __name__ == "__main__":
     TOKEN = os.environ.get("BOT_TOKEN")
     Thread(target=run_web).start()
     if TOKEN:
-        app = Application.builder().token(TOKEN).build()
+        app = Application.builder().token(TOKEN).post_init(post_init).build()
         app.add_handler(CommandHandler("start", start))
+        app.add_handler(CallbackQueryHandler(button_handler))
         app.run_polling()
