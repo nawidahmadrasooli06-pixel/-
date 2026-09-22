@@ -1,3 +1,4 @@
+import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
@@ -5,7 +6,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 # تنظیمات لوگ‌ها
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# اطلاعات سازنده و متن درباره ربات
+# متن بخش درباره سازنده (نوید)
 ABOUT_TEXT_FA = (
     "🎮 **ربات بازی هیجان‌انگیز**\n\n"
     "👨‍💻 **طراحی و توسعه‌یافته توسط:** 〘Cactuc = نــوید\n"
@@ -100,13 +101,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت / Back", callback_data="main_menu")]])
         await query.edit_message_text(msg, reply_markup=back_btn)
 
-# اجرای ربات
+# اجرای اصلی ربات
 if __name__ == "__main__":
-    TOKEN = "YOUR_BOT_TOKEN_HERE"  # توکن جدیدت رو اینجا بگذار
-    app = Application.builder().token(TOKEN).build()
+    # گرفتن توکن از متغیرهای محیطی Render
+    TOKEN = os.environ.get("BOT_TOKEN")
     
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    
-    print("ربات نوید با موفقیت روشن شد...")
-    app.run_polling()
+    if not TOKEN:
+        print("خطا: BOT_TOKEN در Environment Variables تعریف نشده است!")
+    else:
+        app = Application.builder().token(TOKEN).build()
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CallbackQueryHandler(button_handler))
+        
+        print("ربات نوید با موفقیت و بدون باگ در حال اجرا است...")
+        app.run_polling()
