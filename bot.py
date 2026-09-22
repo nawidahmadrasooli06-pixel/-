@@ -93,6 +93,7 @@ HTML_TEMPLATE = """
             display: flex;
             align-items: center;
             justify-content: center;
+            transition: border-color 0.3s, background 0.3s;
         }
         .point.selected {
             border-color: #facc15;
@@ -104,17 +105,30 @@ HTML_TEMPLATE = """
             box-shadow: 0 0 14px #ef4444;
             animation: pulse 1s infinite;
         }
+        .point.mill-highlight {
+            border-color: #facc15;
+            box-shadow: 0 0 18px #facc15;
+            animation: millPulse 0.8s infinite alternate;
+        }
 
         @keyframes pulse {
             0% { transform: translate(-50%, -50%) scale(1); }
             50% { transform: translate(-50%, -50%) scale(1.15); }
             100% { transform: translate(-50%, -50%) scale(1); }
         }
+        @keyframes millPulse {
+            0% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 8px #facc15; }
+            100% { transform: translate(-50%, -50%) scale(1.25); box-shadow: 0 0 20px #facc15; }
+        }
 
         .board-piece {
+            position: absolute;
             width: 20px;
             height: 20px;
             border-radius: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 3;
+            transition: left 0.4s ease-in-out, top 0.4s ease-in-out;
             pointer-events: none;
         }
         .board-piece.blue { background: #00d2ff; box-shadow: 0 0 8px #00d2ff; }
@@ -213,6 +227,7 @@ HTML_TEMPLATE = """
         </svg>
 
         <div class="graveyard" id="graveyard"></div>
+        <div id="pieces-layer"></div>
     </div>
 
     <button class="btn-reset" onclick="resetGame()">شروع مجدد بازی</button>
@@ -230,7 +245,7 @@ HTML_TEMPLATE = """
         const tg = window.Telegram?.WebApp;
         if (tg) tg.expand();
 
-        let playerName = prompt("لطفاً نام خود را برای بازی وارد کنید:", "نوید") || "نوید";
+        let playerName = prompt("لطفاً نام خود را برای بازی وارد کنید:", "احمد") || "احمد";
 
         const POINTS = [
             {id: 0, x: 20, y: 20}, {id: 1, x: 170, y: 20}, {id: 2, x: 320, y: 20},
@@ -263,10 +278,13 @@ HTML_TEMPLATE = """
             killedRed: 0,
             formedMillsBlue: [],
             formedMillsRed: [],
+            lastBrokenMillBlue: null,
+            highlightedMill: [],
             gameOver: false
         };
 
         const boardEl = document.getElementById('board');
+        const piecesLayer = document.getElementById('pieces-layer');
         const statusText = document.getElementById('status-text');
 
         function initBoard() {
@@ -307,21 +325,29 @@ HTML_TEMPLATE = """
 
             POINTS.forEach(pt => {
                 const ptEl = document.getElementById(`pt-${pt.id}`);
-                ptEl.innerHTML = '';
-                ptEl.classList.remove('selected', 'killable');
+                ptEl.classList.remove('selected', 'killable', 'mill-highlight');
                 
                 if (state.selectedPoint === pt.id) {
                     ptEl.classList.add('selected');
                 }
-
                 if (state.isRemoving && state.board[pt.id] === 'red') {
                     ptEl.classList.add('killable');
                 }
+                if (state.highlightedMill.includes(pt.id)) {
+                    ptEl.classList.add('mill-highlight');
+                }
+            });
 
-                if (state.board[pt.id]) {
+            // Smooth sliding pieces layer
+            piecesLayer.innerHTML = '';
+            POINTS.forEach(pt => {
+                const color = state.board[pt.id];
+                if (color) {
                     const piece = document.createElement('div');
-                    piece.className = `board-piece ${state.board[pt.id]}`;
-                    ptEl.appendChild(piece);
+                    piece.className = `board-piece ${color}`;
+                    piece.style.left = `${pt.x}px`;
+                    piece.style.top = `${pt.y}px`;
+                    piecesLayer.appendChild(piece);
                 }
             });
         }
@@ -376,6 +402,7 @@ HTML_TEMPLATE = """
                     state.board[id] = null;
                     state.killedRed++;
                     state.isRemoving = false;
+                    state.highlightedMill = [];
                     if (!checkWinCondition()) {
                         switchTurn();
                     }
@@ -403,14 +430,37 @@ HTML_TEMPLATE = """
                     }
                 } else {
                     if (state.board[id] === null) {
-                        state.board[id] = 'blue';
-                        state.board[state.selectedPoint] = null;
+                        const fromPt = state.selectedPoint;
                         
-                        const isNewMill = checkNewMill(id, 'blue');
+                        // Check back move restriction
+                        if (state.lastBrokenMillBlue && state.lastBrokenMillBlue.from === id && state.lastBrokenMillBlue.to === fromPt) {
+                            setStatus("🚫 بازگشت به قطار قبلی مجاز نیست! ترکیب جدید بسازید.");
+                            state.selectedPoint = null;
+                            updateUI();
+                            return;
+                        }
+
+                        // Temporarily break existing mill tracking for this piece
+                        MILLS.forEach(m => {
+                            if (m.includes(fromPt)) {
+                                let key = m.slice().sort().join('-');
+                                let idx = state.formedMillsBlue.indexOf(key);
+                                if (idx !== -1) {
+                                    state.formedMillsBlue.splice(idx, 1);
+                                    state.lastBrokenMillBlue = { millKey: key, from: fromPt, to: id };
+                                }
+                            }
+                        });
+
+                        state.board[id] = 'blue';
+                        state.board[fromPt] = null;
+                        
+                        const formedMill = getFormedMill(id, 'blue');
                         state.selectedPoint = null;
 
-                        if (isNewMill) {
+                        if (formedMill) {
                             state.isRemoving = true;
+                            state.highlightedMill = formedMill;
                             setStatus("🔥 قطار جدید ساخته شد! یکی از مهره‌های قرمز را بسوزانید.");
                         } else {
                             if (!checkWinCondition()) {
@@ -425,19 +475,22 @@ HTML_TEMPLATE = """
             updateUI();
         }
 
-        function checkNewMill(ptId, color) {
-            let newlyFormed = false;
-            MILLS.forEach(mill => {
+        function getFormedMill(ptId, color) {
+            for (let mill of MILLS) {
                 if (mill.includes(ptId) && mill.every(p => state.board[p] === color)) {
-                    let millKey = mill.sort().join('-');
+                    let millKey = mill.slice().sort().join('-');
                     let formedList = color === 'blue' ? state.formedMillsBlue : state.formedMillsRed;
                     if (!formedList.includes(millKey)) {
                         formedList.push(millKey);
-                        newlyFormed = true;
+                        return mill;
                     }
                 }
-            });
-            return newlyFormed;
+            }
+            return null;
+        }
+
+        function checkNewMill(ptId, color) {
+            return getFormedMill(ptId, color) !== null;
         }
 
         function checkPhase() {
@@ -454,7 +507,7 @@ HTML_TEMPLATE = """
             }
             updateUI();
             if (state.turn === 'red') {
-                setTimeout(aiMove, 600);
+                setTimeout(aiMove, 700);
             }
         }
 
@@ -490,15 +543,29 @@ HTML_TEMPLATE = """
                         for (let t of emptyPoints) {
                             state.board[f] = null;
                             state.board[t] = 'red';
-                            if (checkNewMill(t, 'red')) {
+                            let formedMill = getFormedMill(t, 'red');
+                            if (formedMill) {
                                 moved = true;
-                                let bluePiecesOnBoard = POINTS.map(p => p.id).filter(id => state.board[id] === 'blue');
-                                if (bluePiecesOnBoard.length > 0) {
-                                    let killTarget = bluePiecesOnBoard[Math.floor(Math.random() * bluePiecesOnBoard.length)];
-                                    state.board[killTarget] = null;
-                                    state.killedBlue++;
-                                }
-                                break;
+                                state.highlightedMill = formedMill;
+                                setStatus("🤖 کامپیوتر یک قطار ساخت!");
+                                updateUI();
+
+                                setTimeout(() => {
+                                    let bluePiecesOnBoard = POINTS.map(p => p.id).filter(id => state.board[id] === 'blue');
+                                    if (bluePiecesOnBoard.length > 0) {
+                                        let killTarget = bluePiecesOnBoard[Math.floor(Math.random() * bluePiecesOnBoard.length)];
+                                        state.board[killTarget] = null;
+                                        state.killedBlue++;
+                                    }
+                                    state.highlightedMill = [];
+                                    checkPhase();
+                                    if (!checkWinCondition()) {
+                                        state.turn = 'blue';
+                                        setStatus(state.phase === 'place' ? `نوبت ${playerName}: نقطه خالی را لمس کنید` : `نوبت ${playerName}: مهره را جابه‌جا کنید`);
+                                    }
+                                    updateUI();
+                                }, 1200);
+                                return;
                             }
                             state.board[f] = 'red';
                             state.board[t] = null;
@@ -536,6 +603,8 @@ HTML_TEMPLATE = """
                 killedRed: 0,
                 formedMillsBlue: [],
                 formedMillsRed: [],
+                lastBrokenMillBlue: null,
+                highlightedMill: [],
                 gameOver: false
             };
             setStatus(`نوبت شماست (${playerName}) - مهره بگذارید`);
@@ -726,9 +795,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "about":
         about_text = (
             "🤖 **درباره ربات:**\n\n"
-            "خوش آمدی رفیق! این ربات با هدف ایجاد یک فضای کل‌کل و سرگرمی و خش گزرانی آنلاین و رقابت با رفیقات و هوش مصنوعی طراحی شده بزن بترکون (بترقون)😂🔥\n\n"
+            "خوش آمدی رفیق! این ربات با هدف ایجاد یک فضای کل‌کل و سرگرمی و خوش‌گذرانی آنلاین و رقابت با رفیقات و هوش مصنوعی طراحی شده بزن بترکون😂🔥\n\n"
             "طراحی و ساخت بات\n"
-            "〘Cactuc = نــوید\n"
+            "ldCactuc = نــوید\n"
             "@cactuc580"
         )
         await query.message.reply_text(about_text)
