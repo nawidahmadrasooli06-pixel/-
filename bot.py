@@ -9,10 +9,10 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 # 1. SERVER & REAL-TIME WEBSOCKET CONFIG
 # ==========================================
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'cactuc_game_ultimate_2026'
+app.config['SECRET_KEY'] = 'cactuc_game_master_2026'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
-# ذخیره وضعیت فعال تمام اتاق‌های بازی
+# ذخیره وضعیت زنده اتاق‌های بازی
 game_rooms = {}
 
 HTML_TEMPLATE = """
@@ -21,7 +21,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>🌵 CACTUC - بازی نه‌رگک / سه‌رگک</title>
+    <title>CACTUC - بازی قطار (نه‌رگک)</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
@@ -30,23 +30,13 @@ HTML_TEMPLATE = """
             background-color: #0b132b;
             color: #ffffff;
             font-family: system-ui, -apple-system, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            padding: 10px;
-            overflow: hidden;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            min-height: 100vh; padding: 10px; overflow: hidden;
         }
 
-        /* برند تجاری درخواست شده */
         .brand-title {
-            font-size: 28px;
-            font-weight: 900;
-            letter-spacing: 5px;
-            color: #48cae4;
-            text-shadow: 0 0 12px rgba(72, 202, 228, 0.6);
-            margin-bottom: 6px;
+            font-size: 26px; font-weight: 900; letter-spacing: 4px;
+            color: #48cae4; text-shadow: 0 0 12px rgba(72, 202, 228, 0.6); margin-bottom: 6px;
         }
 
         .screen { display: none; width: 100%; max-width: 360px; text-align: center; }
@@ -56,8 +46,7 @@ HTML_TEMPLATE = """
             width: 100%; padding: 12px; margin: 6px 0;
             background: linear-gradient(135deg, #1c2541, #3a506b);
             color: #ffffff; border: 1.5px solid #48cae4; border-radius: 12px;
-            font-size: 15px; font-weight: bold; cursor: pointer;
-            transition: all 0.2s ease;
+            font-size: 15px; font-weight: bold; cursor: pointer; transition: all 0.2s ease;
         }
         .btn:active { transform: scale(0.97); background: #48cae4; color: #0b132b; }
 
@@ -73,26 +62,31 @@ HTML_TEMPLATE = """
             margin: 10px 0; cursor: pointer; width: 100%;
         }
 
-        /* پنل وضعیت بالای تخته - دقیقاً مثل عکس اول */
         .status-badge {
-            background: rgba(28, 37, 65, 0.9);
-            border: 1px solid #48cae4;
-            border-radius: 20px;
-            padding: 6px 14px;
-            font-size: 13px;
-            color: #fff;
-            margin-bottom: 8px;
-            width: 100%;
+            background: rgba(28, 37, 65, 0.95); border: 1.5px solid #48cae4;
+            border-radius: 20px; padding: 8px 14px; font-size: 13px; font-weight: bold;
+            color: #fff; margin-bottom: 8px; width: 100%; box-shadow: 0 0 10px rgba(72, 202, 228, 0.2);
         }
+
         .players-panel {
             display: flex; justify-content: space-between; align-items: center;
             width: 100%; background: #1c2541; border-radius: 12px;
             padding: 8px 12px; margin-bottom: 10px; border: 1px solid #3a506b;
         }
-        .unplaced-dots { display: flex; gap: 4px; }
-        .dot-mini { width: 12px; height: 12px; border-radius: 50%; }
+
+        .unplaced-container { display: flex; gap: 4px; align-items: center; margin-top: 4px; }
+        .dot-mini {
+            width: 14px; height: 14px; border-radius: 50%; display: flex;
+            align-items: center; justify-content: center; font-size: 8px; font-weight: bold; color: #fff;
+        }
         .dot-mini.blue { background: #00b4d8; box-shadow: 0 0 4px #00b4d8; }
         .dot-mini.red { background: #ff4d6d; box-shadow: 0 0 4px #ff4d6d; }
+        .dot-mini.active-turn { animation: pulse 1s infinite alternate; }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 0.6; }
+            100% { transform: scale(1.25); opacity: 1; filter: brightness(1.3); }
+        }
 
         /* تخته بزرگ و استاندارد */
         .board-container {
@@ -104,8 +98,7 @@ HTML_TEMPLATE = """
         .board-svg line, .board-svg rect { stroke: #3a506b; stroke-width: 2.5; fill: none; }
         
         .center-circle {
-            stroke: #48cae4; stroke-width: 1.5;
-            stroke-dasharray: 4 3; fill: rgba(72, 202, 228, 0.05);
+            stroke: #48cae4; stroke-width: 1.5; stroke-dasharray: 4 3; fill: rgba(72, 202, 228, 0.05);
         }
 
         .point {
@@ -114,36 +107,37 @@ HTML_TEMPLATE = """
             transform: translate(-50%, -50%); z-index: 2; cursor: pointer;
         }
 
-        /* مهره‌ها و افکت زرد درخشان هنگام انتخاب */
         .piece {
             position: absolute; width: 22px; height: 22px; border-radius: 50%;
             transform: translate(-50%, -50%); z-index: 3;
-            transition: left 0.4s cubic-bezier(0.25, 1, 0.5, 1), top 0.4s cubic-bezier(0.25, 1, 0.5, 1);
-            cursor: pointer;
+            transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1); cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 8px; font-weight: bold; color: #fff;
         }
         .piece.blue { background: #00b4d8; box-shadow: 0 0 8px #00b4d8; }
         .piece.red { background: #ff4d6d; box-shadow: 0 0 8px #ff4d6d; }
+        
         .piece.selected {
-            border: 2px solid #ffea00;
-            box-shadow: 0 0 14px #ffea00, 0 0 4px #ffea00 inset;
-            transform: translate(-50%, -50%) scale(1.25);
+            border: 2px solid #ffea00; box-shadow: 0 0 14px #ffea00;
+            transform: translate(-50%, -50%) scale(1.3); z-index: 4;
         }
-        .piece.mill {
-            filter: brightness(0.5);
-            border: 1px solid #fff;
+        .piece.mill { filter: brightness(0.4); border: 1.5px solid #ffea00; }
+        .piece.dead {
+            width: 14px; height: 14px; z-index: 2; opacity: 0.85;
+            transition: all 0.8s ease-in-out;
         }
 
         .toast {
             position: fixed; bottom: 20px; background: #48cae4; color: #0b132b;
             padding: 8px 16px; border-radius: 8px; font-weight: bold; font-size: 13px;
-            display: none; z-index: 99;
+            display: none; z-index: 99; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         }
     </style>
 </head>
 <body>
 
     <div class="brand-title">CACTUC</div>
-    <div id="toast" class="toast">کد کپی شد!</div>
+    <div id="toast" class="toast">پیام سیستم</div>
 
     <!-- ۱. فرم دریافت نام کاربر -->
     <div id="screen-name" class="screen active">
@@ -156,47 +150,39 @@ HTML_TEMPLATE = """
     <div id="screen-main" class="screen">
         <h3 id="welcome-msg" style="margin-bottom: 12px; color: #fff;"></h3>
         <button id="rejoin-btn" class="btn" style="display:none; background: #2a9d8f; border-color: #2a9d8f;" onclick="rejoinGame()">▶️ ادامه بازی قبلی</button>
-        <button class="btn" onclick="showScreen('screen-mode-select')">👥 بازی آنلاین با دوست</button>
+        <button class="btn" onclick="showScreen('screen-room-action')">👥 بازی آنلاین با دوست</button>
         <button class="btn" onclick="startAIGame()">🤖 بازی با کامپیوتر (آفلاین)</button>
     </div>
 
-    <!-- ۳. انتخاب حالت سه‌رگک / نه‌رگک -->
-    <div id="screen-mode-select" class="screen">
-        <h3 style="margin-bottom: 12px; color: #48cae4;">انتخاب سبک:</h3>
-        <button class="btn" onclick="selectMode('sere')">⚔️ سه‌رگک (۳ مهره)</button>
-        <button class="btn" onclick="selectMode('nael')">👑 نه‌رگک (۹ مهره)</button>
-        <button class="btn" style="border-color:#ff4d6d; color:#ff4d6d;" onclick="showScreen('screen-main')">🔙 بازگشت</button>
-    </div>
-
-    <!-- ۴. ساخت / ورود به اتاق -->
+    <!-- ۳. ساخت / ورود به اتاق -->
     <div id="screen-room-action" class="screen">
         <button class="btn" onclick="createNewRoom()">➕ ساخت اتاق جدید</button>
         <div style="margin: 10px 0; width: 100%;">
             <input type="number" id="room-code-input" class="input-box" placeholder="کد ۴ رقمی">
             <button class="btn" onclick="joinRoomByCode()">🔑 ورود به اتاق</button>
         </div>
-        <button class="btn" style="border-color:#ff4d6d; color:#ff4d6d;" onclick="showScreen('screen-mode-select')">🔙 بازگشت</button>
+        <button class="btn" style="border-color:#ff4d6d; color:#ff4d6d;" onclick="showScreen('screen-main')">🔙 بازگشت</button>
     </div>
 
-    <!-- ۵. نمایش کد اتاق -->
+    <!-- ۴. نمایش کد اتاق -->
     <div id="screen-room-created" class="screen">
         <h3 style="color: #48cae4;">کد اتاق شما:</h3>
         <div id="created-code" class="code-box" onclick="copyCode()">----</div>
         <p style="font-size: 12px; color: #aaa;">کد را برای دوستتان بفرستید. با ورود او بازی شروع می‌شود.</p>
     </div>
 
-    <!-- ۶. تخته اصلی بازی -->
+    <!-- ۵. تخته اصلی بازی -->
     <div id="screen-board" class="screen">
         <div class="status-badge" id="status-turn">نوبت شماست!</div>
 
         <div class="players-panel">
             <div>
-                <span id="p1-name" style="color:#00b4d8; font-weight:bold;">شما</span>
-                <div class="unplaced-dots" id="p1-dots"></div>
+                <span id="p1-name" style="color:#00b4d8; font-weight:bold;">بازیکن ۱</span>
+                <div class="unplaced-container" id="p1-dots"></div>
             </div>
             <div>
-                <span id="p2-name" style="color:#ff4d6d; font-weight:bold;">حریف</span>
-                <div class="unplaced-dots" id="p2-dots"></div>
+                <span id="p2-name" style="color:#ff4d6d; font-weight:bold;">بازیکن ۲</span>
+                <div class="unplaced-container" id="p2-dots"></div>
             </div>
         </div>
 
@@ -214,7 +200,7 @@ HTML_TEMPLATE = """
             <div id="pieces-layer"></div>
         </div>
 
-        <button class="btn" style="margin-top: 12px; background: #ff4d6d; border: none;" onclick="restartGame()">شروع مجدد بازی</button>
+        <button class="btn" style="margin-top: 12px; background: #ff4d6d; border: none;" onclick="restartGame()">شروع مجدد / پاک کردن این تخته</button>
     </div>
 
     <script>
@@ -224,14 +210,12 @@ HTML_TEMPLATE = """
 
         let playerName = localStorage.getItem('cactuc_player_name') || '';
         let currentRoom = localStorage.getItem('cactuc_last_room') || null;
-        let gameMode = 'nael';
         let isAI = false;
         let myColor = 'blue';
         let selectedIndex = null;
         let isRemoveMode = false;
         let activeMillPoints = [];
 
-        // صداها
         const sndPlace = new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3');
         const sndMove = new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3');
         const sndRemove = new Audio('https://assets.mixkit.co/active_storage/sfx/2573/2573-preview.mp3');
@@ -263,27 +247,32 @@ HTML_TEMPLATE = """
 
         let gameState = {
             board: Array(24).fill(null),
-            blueUnplaced: 9,
-            redUnplaced: 9,
-            turn: 'blue',
-            phase: 'place',
-            deadBlue: 0,
-            deadRed: 0,
-            p1Name: 'بازیکن ۱',
-            p2Name: 'بازیکن ۲'
+            blueUnplaced: 9, redUnplaced: 9,
+            turn: 'blue', phase: 'place',
+            deadBlue: 0, deadRed: 0,
+            p1Name: 'بازیکن ۱', p2Name: 'بازیکن ۲',
+            lastMills: { blue: [], red: [] },
+            isFinished: false
         };
 
         window.onload = () => {
             if (playerName) {
                 document.getElementById('welcome-msg').innerText = `سلام ${playerName} عزیز 👋`;
                 showScreen('screen-main');
-                if (currentRoom) {
-                    document.getElementById('rejoin-btn').style.display = 'block';
-                }
+                checkRejoinStatus();
             } else {
                 showScreen('screen-name');
             }
         };
+
+        function checkRejoinStatus() {
+            const isFinished = localStorage.getItem('cactuc_game_finished') === 'true';
+            if (currentRoom && !isFinished) {
+                document.getElementById('rejoin-btn').style.display = 'block';
+            } else {
+                document.getElementById('rejoin-btn').style.display = 'none';
+            }
+        }
 
         function savePlayerName() {
             const val = document.getElementById('player-name-input').value.trim();
@@ -300,18 +289,14 @@ HTML_TEMPLATE = """
             document.getElementById(id).classList.add('active');
         }
 
-        function selectMode(m) {
-            gameMode = m;
-            showScreen('screen-room-action');
-        }
-
         function createNewRoom() {
             isAI = false;
             currentRoom = Math.floor(1000 + Math.random() * 9000).toString();
             localStorage.setItem('cactuc_last_room', currentRoom);
+            localStorage.setItem('cactuc_game_finished', 'false');
             document.getElementById('created-code').innerText = currentRoom;
             showScreen('screen-room-created');
-            socket.emit('join_game', { room: currentRoom, playerName, mode: gameMode });
+            socket.emit('join_game', { room: currentRoom, playerName });
         }
 
         function joinRoomByCode() {
@@ -320,6 +305,7 @@ HTML_TEMPLATE = """
             if (code.length === 4) {
                 currentRoom = code;
                 localStorage.setItem('cactuc_last_room', currentRoom);
+                localStorage.setItem('cactuc_game_finished', 'false');
                 socket.emit('join_game', { room: currentRoom, playerName });
             }
         }
@@ -331,28 +317,27 @@ HTML_TEMPLATE = """
         }
 
         function startAIGame() {
-            isAI = true;
-            myColor = 'blue';
-            const maxP = gameMode === 'sere' ? 3 : 9;
+            isAI = true; myColor = 'blue';
+            localStorage.setItem('cactuc_game_finished', 'false');
             gameState = {
                 board: Array(24).fill(null),
-                blueUnplaced: maxP, redUnplaced: maxP,
+                blueUnplaced: 9, redUnplaced: 9,
                 turn: 'blue', phase: 'place',
                 deadBlue: 0, deadRed: 0,
-                p1Name: playerName, p2Name: 'کامپیوتر'
+                p1Name: playerName, p2Name: 'کامپیوتر (سخت)',
+                lastMills: { blue: [], red: [] },
+                isFinished: false
             };
             showScreen('screen-board');
             render();
         }
 
-        // ایجاد نقاط روی تخته
         const boardEl = document.getElementById('board');
         const piecesLayer = document.getElementById('pieces-layer');
         POINTS.forEach(pt => {
             const div = document.createElement('div');
             div.className = 'point';
-            div.style.left = `${pt.x}px`;
-            div.style.top = `${pt.y}px`;
+            div.style.left = `${pt.x}px`; div.style.top = `${pt.y}px`;
             div.onclick = () => handlePointClick(pt.id);
             boardEl.appendChild(div);
         });
@@ -360,7 +345,6 @@ HTML_TEMPLATE = """
         function handlePointClick(id) {
             if (!isAI && gameState.turn !== myColor) return;
 
-            // حذف مهره حریف پس از قطار
             if (isRemoveMode) {
                 const opp = gameState.turn === 'blue' ? 'red' : 'blue';
                 if (gameState.board[id] === opp) {
@@ -373,7 +357,6 @@ HTML_TEMPLATE = """
                 return;
             }
 
-            // گذاشتن مهره
             if (gameState.phase === 'place') {
                 if (gameState.board[id] === null) {
                     const c = gameState.turn;
@@ -381,21 +364,11 @@ HTML_TEMPLATE = """
                     else if (c === 'red' && gameState.redUnplaced > 0) { gameState.board[id] = 'red'; gameState.redUnplaced--; }
                     sndPlace.play();
 
-                    const mill = getMillPoints(id, c);
-                    if (mill) {
-                        isRemoveMode = true;
-                        activeMillPoints = mill;
-                        sndRemove.play();
-                        render();
-                        return;
-                    }
-
                     checkPhase();
                     switchTurn();
                     sync();
                 }
             }
-            // جابه‌جایی مهره
             else if (gameState.phase === 'move') {
                 const c = gameState.turn;
                 if (selectedIndex === null) {
@@ -410,10 +383,11 @@ HTML_TEMPLATE = """
                     } else if (gameState.board[id] === null && ADJACENT[selectedIndex].includes(id)) {
                         gameState.board[id] = c;
                         gameState.board[selectedIndex] = null;
+                        const fromPos = selectedIndex;
                         selectedIndex = null;
                         sndMove.play();
 
-                        const mill = getMillPoints(id, c);
+                        const mill = checkNewMill(id, c, fromPos);
                         if (mill) {
                             isRemoveMode = true;
                             activeMillPoints = mill;
@@ -429,21 +403,34 @@ HTML_TEMPLATE = """
             }
         }
 
+        function checkNewMill(id, color, fromPos) {
+            for (let line of LINES) {
+                if (line.includes(id) && line.every(p => gameState.board[p] === color)) {
+                    const millKey = line.sort().join('-');
+                    const prevMills = gameState.lastMills[color] || [];
+                    if (prevMills.includes(millKey) && line.includes(fromPos)) {
+                        showToast("❌ راه برگشت تکراری! باید قطار جدید بسازید.");
+                        return null;
+                    }
+                    gameState.lastMills[color].push(millKey);
+                    return line;
+                }
+            }
+            return null;
+        }
+
         function removePiece(id) {
             const c = gameState.board[id];
             gameState.board[id] = null;
             if (c === 'blue') gameState.deadBlue++;
             if (c === 'red') gameState.deadRed++;
             sndRemove.play();
-        }
 
-        function getMillPoints(id, color) {
-            for (let line of LINES) {
-                if (line.includes(id) && line.every(p => gameState.board[p] === color)) {
-                    return line;
-                }
+            if (gameState.deadBlue >= 7 || gameState.deadRed >= 7) {
+                gameState.isFinished = true;
+                localStorage.setItem('cactuc_game_finished', 'true');
+                showToast("🎉 بازی به پایان رسید!");
             }
-            return null;
         }
 
         function checkPhase() {
@@ -454,27 +441,25 @@ HTML_TEMPLATE = """
 
         function switchTurn() {
             gameState.turn = gameState.turn === 'blue' ? 'red' : 'blue';
-            if (isAI && gameState.turn === 'red') setTimeout(makeAIMove, 600);
+            if (isAI && gameState.turn === 'red' && !gameState.isFinished) {
+                setTimeout(makeHardAIMove, 700);
+            }
         }
 
-        function makeAIMove() {
+        function makeHardAIMove() {
             if (isRemoveMode) {
-                const idxs = gameState.board.map((v, i) => v === 'blue' ? i : null).filter(v => v !== null);
-                if (idxs.length) { removePiece(idxs[0]); isRemoveMode = false; activeMillPoints = []; switchTurn(); render(); }
+                const oppIdxs = gameState.board.map((v, i) => v === 'blue' ? i : null).filter(v => v !== null);
+                if (oppIdxs.length) { removePiece(oppIdxs[0]); isRemoveMode = false; activeMillPoints = []; switchTurn(); render(); }
                 return;
             }
 
             if (gameState.phase === 'place') {
                 const empty = gameState.board.map((v, i) => v === null ? i : null).filter(v => v !== null);
-                if (empty.length && gameState.redUnplaced > 0) {
+                if (empty.length) {
                     const pick = empty[Math.floor(Math.random() * empty.length)];
                     gameState.board[pick] = 'red';
                     gameState.redUnplaced--;
                     sndPlace.play();
-
-                    const mill = getMillPoints(pick, 'red');
-                    if (mill) { isRemoveMode = true; activeMillPoints = mill; makeAIMove(); return; }
-
                     checkPhase(); switchTurn(); render();
                 }
             } else {
@@ -485,8 +470,8 @@ HTML_TEMPLATE = """
                         const to = valid[0];
                         gameState.board[to] = 'red'; gameState.board[from] = null;
                         sndMove.play();
-                        const mill = getMillPoints(to, 'red');
-                        if (mill) { isRemoveMode = true; activeMillPoints = mill; makeAIMove(); return; }
+                        const mill = checkNewMill(to, 'red', from);
+                        if (mill) { isRemoveMode = true; activeMillPoints = mill; makeHardAIMove(); return; }
                         switchTurn(); render(); break;
                     }
                 }
@@ -503,46 +488,49 @@ HTML_TEMPLATE = """
         function render() {
             piecesLayer.innerHTML = '';
 
-            // مهره‌های روی تخته
             POINTS.forEach(pt => {
                 const color = gameState.board[pt.id];
                 if (color) {
                     const p = document.createElement('div');
                     const isSelected = selectedIndex === pt.id;
                     const isMill = activeMillPoints.includes(pt.id);
+                    const initial = color === 'blue' ? gameState.p1Name[0] : gameState.p2Name[0];
                     p.className = `piece ${color} ${isSelected ? 'selected' : ''} ${isMill ? 'mill' : ''}`;
-                    p.style.left = `${pt.x}px`;
-                    p.style.top = `${pt.y}px`;
+                    p.style.left = `${pt.x}px`; p.style.top = `${pt.y}px`;
+                    p.innerText = initial || '';
                     p.onclick = () => handlePointClick(pt.id);
                     piecesLayer.appendChild(p);
                 }
             });
 
-            // مهره‌های سوخته در اتاق مرکز (انیمیشن کشویی)
+            // مهره‌های سوخته با انیمیشن ملایم در دایره وسط
             for (let i = 0; i < gameState.deadBlue; i++) {
                 const p = document.createElement('div');
-                p.className = 'piece blue';
-                p.style.left = `${152 + (i * 5)}px`;
-                p.style.top = `162px`;
+                p.className = 'piece blue dead';
+                p.style.left = `${155 + (i * 4)}px`; p.style.top = `162px`;
                 piecesLayer.appendChild(p);
             }
             for (let i = 0; i < gameState.deadRed; i++) {
                 const p = document.createElement('div');
-                p.className = 'piece red';
-                p.style.left = `${152 + (i * 5)}px`;
-                p.style.top = `176px`;
+                p.className = 'piece red dead';
+                p.style.left = `${155 + (i * 4)}px`; p.style.top = `176px`;
                 piecesLayer.appendChild(p);
             }
 
-            // مهره‌های نچیده شده بالای صفحه (مطابق عکس اول)
+            // مهره‌های نچیده شده بالای صفحه
             const p1Dots = document.getElementById('p1-dots');
             const p2Dots = document.getElementById('p2-dots');
             p1Dots.innerHTML = ''; p2Dots.innerHTML = '';
+            const p1Init = gameState.p1Name[0] || '۱';
+            const p2Init = gameState.p2Name[0] || '۲';
+
             for (let i = 0; i < gameState.blueUnplaced; i++) {
-                p1Dots.innerHTML += '<div class="dot-mini blue"></div>';
+                const active = gameState.turn === 'blue' ? 'active-turn' : '';
+                p1Dots.innerHTML += `<div class="dot-mini blue ${active}">${p1Init}</div>`;
             }
             for (let i = 0; i < gameState.redUnplaced; i++) {
-                p2Dots.innerHTML += '<div class="dot-mini red"></div>';
+                const active = gameState.turn === 'red' ? 'active-turn' : '';
+                p2Dots.innerHTML += `<div class="dot-mini red ${active}">${p2Init}</div>`;
             }
 
             document.getElementById('p1-name').innerText = gameState.p1Name || 'بازیکن ۱';
@@ -562,37 +550,31 @@ HTML_TEMPLATE = """
         }
 
         function restartGame() {
-            const maxP = gameMode === 'sere' ? 3 : 9;
+            localStorage.setItem('cactuc_game_finished', 'true');
             gameState.board = Array(24).fill(null);
-            gameState.blueUnplaced = maxP; gameState.redUnplaced = maxP;
+            gameState.blueUnplaced = 9; gameState.redUnplaced = 9;
             gameState.deadBlue = 0; gameState.deadRed = 0;
             gameState.phase = 'place'; gameState.turn = 'blue';
+            gameState.lastMills = { blue: [], red: [] };
+            gameState.isFinished = false;
             sync();
+            showScreen('screen-main');
+            checkRejoinStatus();
         }
 
         function copyCode() {
-            navigator.clipboard.writeText(currentRoom).then(() => {
-                const t = document.getElementById('toast');
-                t.style.display = 'block';
-                setTimeout(() => t.style.display = 'none', 2000);
-            });
+            navigator.clipboard.writeText(currentRoom).then(() => showToast("کد اتاق کپی شد!"));
         }
 
-        // دریافت رویدادها از سرور
-        socket.on('player_assigned', (data) => {
-            myColor = data.color;
-        });
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.innerText = msg; t.style.display = 'block';
+            setTimeout(() => t.style.display = 'none', 2500);
+        }
 
-        socket.on('start_game', (data) => {
-            showScreen('screen-board');
-            gameState = data.state;
-            render();
-        });
-
-        socket.on('board_updated', (state) => {
-            gameState = state;
-            render();
-        });
+        socket.on('player_assigned', (data) => { myColor = data.color; });
+        socket.on('start_game', (data) => { showScreen('screen-board'); gameState = data.state; render(); });
+        socket.on('board_updated', (state) => { gameState = state; render(); });
     </script>
 </body>
 </html>
@@ -609,19 +591,16 @@ def handle_join_game(data):
     join_room(room)
 
     if room not in game_rooms:
-        max_p = 3 if data.get('mode') == 'sere' else 9
         game_rooms[room] = {
             'players': [],
             'state': {
                 'board': [None] * 24,
-                'blueUnplaced': max_p,
-                'redUnplaced': max_p,
-                'turn': 'blue',
-                'phase': 'place',
-                'deadBlue': 0,
-                'deadRed': 0,
-                'p1Name': p_name,
-                'p2Name': 'در حال انتظار...'
+                'blueUnplaced': 9, 'redUnplaced': 9,
+                'turn': 'blue', 'phase': 'place',
+                'deadBlue': 0, 'deadRed': 0,
+                'p1Name': p_name, 'p2Name': 'در حال انتظار...',
+                'lastMills': {'blue': [], 'red': []},
+                'isFinished': False
             }
         }
 
@@ -658,11 +637,11 @@ WEBAPP_URL = os.getenv("WEBAPP_URL", "https://your-domain.onrender.com")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [
-        [InlineKeyboardButton("🎮 ورود به بازی قطار (CACTUC)", web_app=WebAppInfo(url=WEBAPP_URL))],
+        [InlineKeyboardButton("🎮 ورود به بازی قطار", web_app=WebAppInfo(url=WEBAPP_URL))],
         [InlineKeyboardButton("📖 راهنمای بازی", callback_data="guide"), InlineKeyboardButton("ℹ️ درباره ربات", callback_data="about")],
         [InlineKeyboardButton("⚙️ تنظیمات", callback_data="settings")]
     ]
-    msg = "👑 **به مرکز بازی‌های استراتژیک (CACTUC) خوش آمدید.**\nجهت شروع بازی دکمه زیر را لمس کنید:"
+    msg = "👑 **به ربات بازی قطار (CACTUC) خوش آمدید.**\nبرای شروع بازی روی دکمه زیر کلیک کنید:"
     await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -671,18 +650,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "guide":
         guide_text = (
-            "📖 **راهنمای بازی CACTUC:**\n\n"
-            "⚔️ **سه‌رگک:** ۳ مهره دارید. با قرار دادن ۳ مهره در یک خط، قطار بسازید و مهره حریف را بسوزانید.\n\n"
-            "👑 **نه‌رگک:** ۹ مهره دارید. شامل ۲ مرحله گذاشتن مهره و جابه‌جایی کشویی است."
+            "📖 **راهنمای بازی قطار (نه‌رگک):**\n\n"
+            "۱. هر بازیکن ۹ مهره در اختیار دارد.\n"
+            "۲. در مرحله چیدمان قطار ساخته نمی‌شود.\n"
+            "۳. پس از چیدن تمام مهره‌ها، با تشکیل قطار می‌توانید مهره حریف را بسوزانید.\n"
+            "۴. ساخت قطارهای تکراری با رفت‌وبرگشت ممنوع است."
         )
         await query.message.reply_text(guide_text, parse_mode='Markdown')
 
     elif query.data == "about":
-        about_text = "ℹ️ **درباره ربات:**\nپلتفرم آنلاین و زنده بازی قطار.\nسازنده: نوید"
-        await query.message.reply_text(about_text, parse_mode='Markdown')
+        await query.message.reply_text("ℹ️ **درباره ربات:**\nپلتفرم آنلاین و زنده بازی قطار CACTUC.\nسازنده: نوید", parse_mode='Markdown')
 
     elif query.data == "settings":
-        await query.message.reply_text("⚙️ **تنظیمات:** کلیه جلوه‌ها و افکت‌های صوتی آنلاین فعال می‌باشند.")
+        await query.message.reply_text("⚙️ **تنظیمات:** کلیه سیستم‌های صوتی و آنلاین فعال می‌باشند.")
 
 if __name__ == '__main__':
     import threading
