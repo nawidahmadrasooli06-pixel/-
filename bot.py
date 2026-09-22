@@ -5,200 +5,186 @@ import logging
 from threading import Thread
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# ساخت وب‌سرور برای آنلاین ماندن در Render
 web_app = Flask('')
 
 @web_app.route('/')
 def home():
-    return "Bot is alive and running!"
+    return "Bot is active!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     web_app.run(host='0.0.0.0', port=port)
 
-# حافظه بازی‌ها
-rooms = {}
-ai_games = {}
+# تعریف تمام ۱۶ قطار مجاز در بازی (طبق نقشه نوید)
+MILLS = [
+    # ۳ مربع (اضلاع)
+    (0, 1, 2), (2, 3, 4), (4, 5, 6), (6, 7, 0),       # مربع بیرونی
+    (8, 9, 10), (10, 11, 12), (12, 13, 14), (14, 15, 8), # مربع میانی
+    (16, 17, 18), (18, 19, 20), (20, 21, 22), (22, 23, 16), # مربع کوچک
+    
+    # ۴ خط رابط وسط مربع‌ها
+    (1, 9, 17),   # خط بالا
+    (3, 11, 19),  # خط راست
+    (5, 13, 21),  # خط پایین
+    (7, 15, 23)   # خط چپ
+]
 
-ABOUT_TEXT_FA = (
-    "🎮 **ربات بازی هیجان‌انگیز**\n\n"
-    "👨‍💻 **طراحی و توسعه‌یافته توسط:** 〘Cactuc = نــوید\n"
-    "🆔 @cactuc580\n\n"
-    "💡 *اگر نظر، پیشنهاد یا ایده‌ای برای بهتر شدن بازی داشتید، می‌توانید با من در میان بگذارید.*\n\n"
-    "📌 *این ربات گیمینگ صرفاً برای سرگرمی و خوش‌گذشتن شما عزیزان ساخته شده است. امیدوارم نهایت لذت را ببرید! ❤️*"
-)
+# حافظه بازی نهره‌گک
+games = {}
 
-RULES_NAHREGAK = (
-    "📜 **راهنمای بازی نهره‌گک (دوز ۹ تایی سنتی):**\n\n"
-    "۱. هر بازیکن با ۹ مهره بازی را شروع می‌کند.\n"
-    "۲. هدف این است که با چیدن ۳ مهره در یک خط، یک **قطار** بسازید.\n"
-    "۳. با هر بار ساخت قطار، می‌توانید یکی از مهره‌های حریف را بسوزانید!\n"
-    "۴. بازیکن زمانی می‌بازد که تعداد مهره‌هایش به کمتر از ۳ برسد."
-)
+def create_board_markup(board, hand_p, hand_ai, burned_p, burned_ai):
+    def symbol(i):
+        if board[i] == "P": return "🔵"   # مهره شما (آبی)
+        elif board[i] == "AI": return "🔴" # مهره حریف (قرمز)
+        return "⚪"                       # نقطه خالی
 
-def get_main_menu():
-    keyboard = [
-        [InlineKeyboardButton("🎮 بازی دوز سریع (۳x۳)", callback_data="play_ai_3")],
-        [InlineKeyboardButton("🏆 بازی نهره‌گک (۹ مهره‌ای سنتی)", callback_data="play_nahregak")],
-        [InlineKeyboardButton("🔗 بازی با دوستان (کد اتاق)", callback_data="play_friends_menu")],
-        [InlineKeyboardButton("⚙️ تنظیمات", callback_data="settings"), InlineKeyboardButton("🏆 جدول برترین‌ها", callback_data="leaderboard")],
-        [InlineKeyboardButton("درباره ربات ℹ️", callback_data="about")]
+    kb = [
+        # مخزن مهره‌های دو طرف (قبل از چیدن)
+        [InlineKeyboardButton(f"🎒 دست شما: {hand_p} مهره", callback_data="guide_hand"),
+         InlineKeyboardButton(f"🎒 دست حریف: {hand_ai} مهره", callback_data="guide_hand")],
+        
+        # 🟢 مربع بیرونی (ضلع بالا)
+        [InlineKeyboardButton(symbol(0), callback_data="pos_0"), InlineKeyboardButton("━━━", callback_data="none"),
+         InlineKeyboardButton(symbol(1), callback_data="pos_1"), InlineKeyboardButton("━━━", callback_data="none"),
+         InlineKeyboardButton(symbol(2), callback_data="pos_2")],
+        
+        # 🟡 مربع میانی (ضلع بالا)
+        [InlineKeyboardButton("┃", callback_data="none"), InlineKeyboardButton(symbol(8), callback_data="pos_8"),
+         InlineKeyboardButton(symbol(9), callback_data="pos_9"), InlineKeyboardButton(symbol(10), callback_data="pos_10"),
+         InlineKeyboardButton("┃", callback_data="none")],
+
+        # 🔴 مربع کوچک داخلی (ضلع بالا)
+        [InlineKeyboardButton("┃ ┃", callback_data="none"), InlineKeyboardButton(symbol(16), callback_data="pos_16"),
+         InlineKeyboardButton(symbol(17), callback_data="pos_17"), InlineKeyboardButton(symbol(18), callback_data="pos_18"),
+         InlineKeyboardButton("┃ ┃", callback_data="none")],
+
+        # 🎯 خط وسط + دایره مرکز (خانه سوخته‌ها)
+        [InlineKeyboardButton(symbol(7), callback_data="pos_7"), InlineKeyboardButton(symbol(15), callback_data="pos_15"),
+         InlineKeyboardButton(symbol(23), callback_data="pos_23"), 
+         InlineKeyboardButton(f"🔥 سوخته: {burned_p + burned_ai}", callback_data="guide_burned"),
+         InlineKeyboardButton(symbol(19), callback_data="pos_19"), InlineKeyboardButton(symbol(11), callback_data="pos_11"),
+         InlineKeyboardButton(symbol(3), callback_data="pos_3")],
+
+        # 🔴 مربع کوچک داخلی (ضلع پایین)
+        [InlineKeyboardButton("┃ ┃", callback_data="none"), InlineKeyboardButton(symbol(22), callback_data="pos_22"),
+         InlineKeyboardButton(symbol(21), callback_data="pos_21"), InlineKeyboardButton(symbol(20), callback_data="pos_20"),
+         InlineKeyboardButton("┃ ┃", callback_data="none")],
+
+        # 🟡 مربع میانی (ضلع پایین)
+        [InlineKeyboardButton("┃", callback_data="none"), InlineKeyboardButton(symbol(14), callback_data="pos_14"),
+         InlineKeyboardButton(symbol(13), callback_data="pos_13"), InlineKeyboardButton(symbol(12), callback_data="pos_12"),
+         InlineKeyboardButton("┃", callback_data="none")],
+
+        # 🟢 مربع بیرونی (ضلع پایین)
+        [InlineKeyboardButton(symbol(6), callback_data="pos_6"), InlineKeyboardButton("━━━", callback_data="none"),
+         InlineKeyboardButton(symbol(5), callback_data="pos_5"), InlineKeyboardButton("━━━", callback_data="none"),
+         InlineKeyboardButton(symbol(4), callback_data="pos_4")],
+
+        [InlineKeyboardButton("🔙 انصراف و بازگشت به منو", callback_data="main_menu")]
     ]
-    return InlineKeyboardMarkup(keyboard)
-
-def render_board_3x3(board, prefix="cell"):
-    keyboard = []
-    for i in range(0, 9, 3):
-        row = []
-        for j in range(3):
-            idx = i + j
-            val = board[idx] if board[idx] != " " else "▫️"
-            row.append(InlineKeyboardButton(val, callback_data=f"{prefix}_{idx}"))
-        keyboard.append(row)
-    keyboard.append([InlineKeyboardButton("❌ انصراف / خروج", callback_data="main_menu")])
-    return InlineKeyboardMarkup(keyboard)
+    return InlineKeyboardMarkup(kb)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    welcome_msg = f"سلام {user.first_name} عزیز! 👋\nبه ربات گیمینگ نوید خوش آمدی. یک حالت بازی را انتخاب کن:"
-    await update.message.reply_text(welcome_msg, reply_markup=get_main_menu())
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎮 شروع بازی نهره‌گک (تخته سنتی)", callback_data="start_game")],
+        [InlineKeyboardButton("درباره ربات ℹ️", callback_data="about")]
+    ])
+    await update.message.reply_text("سلام رفیق! به بازی جذاب نهره‌گک خوش اومدی. آماده‌ای؟ 👇", reply_markup=kb)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     data = query.data
     user_id = query.from_user.id
 
-    if data == "about":
-        back_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="main_menu")]])
-        await query.edit_message_text(ABOUT_TEXT_FA, reply_markup=back_btn, parse_mode="Markdown")
+    if data == "guide_hand":
+        await query.answer("رفیق! اول باید هر ۹ تا مهره‌تون رو یکی‌یکی وارد تخته کنین، بعدش جابه‌جایی شروع میشه! 😉", show_alert=True)
+        return
+    elif data == "guide_burned":
+        await query.answer("اینجا دایره مرکزه! هر قطاری که ساخته بشه، مهره‌های سوخته حریف میان اینجا جا خوش می‌کنن! 🔥", show_alert=True)
+        return
 
-    elif data == "main_menu":
-        context.user_data["awaiting_code"] = False
-        await query.edit_message_text("منوی اصلی بازی:", reply_markup=get_main_menu())
-
-    elif data == "play_nahregak":
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎲 شروع بازی ۹ مهره‌ای با ربات", callback_data="play_ai_9")],
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="main_menu")]
-        ])
-        await query.edit_message_text(RULES_NAHREGAK, reply_markup=kb, parse_mode="Markdown")
-
-    elif data == "play_friends_menu":
-        kb = [
-            [InlineKeyboardButton("➕ ساخت اتاق جدید", callback_data="create_room")],
-            [InlineKeyboardButton("🔑 ورود با کد اتاق", callback_data="join_room_prompt")],
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="main_menu")]
-        ]
-        await query.edit_message_text("🎮 **بخش بازی با دوستان**\nیکی از گزینه‌ها را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
-
-    elif data == "create_room":
-        room_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
-        rooms[room_code] = {"host": user_id, "guest": None, "board": [" "] * 9}
-        
-        msg = (
-            f"🏰 **اتاق بازی شما ساخته شد!**\n\n"
-            f"🔑 کد اتاق: `{room_code}`\n\n"
-            f"این کد ۴ رقمی را برای دوستت بفرست تا وارد اتاق شود!"
+    if data == "start_game":
+        games[user_id] = {
+            "board": [" "] * 24,
+            "hand_p": 9,
+            "hand_ai": 9,
+            "burned_p": 0,
+            "burned_ai": 0,
+            "mode": "place" # place (چیدن اول) / burn (سوزاندن)
+        }
+        await query.answer()
+        await query.edit_message_text(
+            "📜 **بازی نهره‌گک شروع شد!**\n\n"
+            "۱. ابتدا مهره‌های آبی (🔵) خودت رو یکی‌یکی روی نقاط خالی بذار.\n"
+            "۲. وقتی هر ۲ نفر ۹ مهره رو گذاشتید، نوبت حرکت دادن می‌رسه.\n"
+            "۳. هر وقت قطار ۳‌تایی ساختی، می‌تونی یک مهره قرمز رو بسوزونی!",
+            reply_markup=create_board_markup(games[user_id]["board"], 9, 9, 0, 0),
+            parse_mode="Markdown"
         )
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="play_friends_menu")]])
-        await query.edit_message_text(msg, reply_markup=kb, parse_mode="Markdown")
+        return
 
-    elif data == "join_room_prompt":
-        context.user_data["awaiting_code"] = True
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 انصراف", callback_data="play_friends_menu")]])
-        await query.edit_message_text("🔑 **لطفاً کد ۴ رقمی اتاق را بفرستید:**", reply_markup=kb, parse_mode="Markdown")
-
-    # بازی ۳x۳
-    elif data in ["play_ai_3", "play_ai_9"]:
-        ai_games[user_id] = {"board": [" "] * 9, "turn": "user"}
-        msg_text = "🎮 **نوبت شماست!** (مهره شما: 🟦 / مهره هوش مصنوعی: 🟥)"
-        await query.edit_message_text(msg_text, reply_markup=render_board_3x3(ai_games[user_id]["board"], "ai_cell"))
-
-    elif data.startswith("ai_cell_"):
-        idx = int(data.split("_")[2])
-        game = ai_games.get(user_id)
-        if not game or game["board"][idx] != " ":
-            return
-
-        # حرکت کاربر (مهره آبی)
-        game["board"][idx] = "🟦"
+    if data.startswith("pos_"):
+        idx = int(data.split("_")[1])
+        g = games.get(user_id)
         
-        if check_winner(game["board"]) == "🟦":
-            end_kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 شروع مجدد بازی (/start)", callback_data="main_menu")]
-            ])
-            await query.edit_message_text(
-                "🎉🔥 **پیروزی عالی! شما برنده این نبرد شدید!** 🔥🎉\n\n"
-                "دمت گرم! هوش مصنوعی را با یک قطار فوق‌العاده شکست دادی. 💪\n"
-                "برای بازی دوباره، دکمه زیر را لمس کنید:",
-                reply_markup=end_kb,
-                parse_mode="Markdown"
-            )
+        if not g:
+            await query.answer("بازی تموم شده رفیق! از اول استارت بزن.", show_alert=True)
             return
 
-        # حرکت هوش مصنوعی (مهره قرمز)
-        empty_cells = [i for i, val in enumerate(game["board"]) if val == " "]
-        if empty_cells:
-            ai_move = random.choice(empty_cells)
-            game["board"][ai_move] = "🟥"
-            
-            if check_winner(game["board"]) == "🟥":
-                end_kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔄 شروع مجدد بازی (/start)", callback_data="main_menu")]
-                ])
-                await query.edit_message_text(
-                    "🤖 **هوش مصنوعی این بار برنده شد!**\n\n"
-                    "اشکالی نداره، دوباره شانس خودت رو امتحان کن. 😉\n"
-                    "برای شروع مجدد روی دکمه زیر بزن:",
-                    reply_markup=end_kb,
-                    parse_mode="Markdown"
-                )
+        # اگر در حالت سوزاندن مهره حریف باشیم
+        if g["mode"] == "burn":
+            if g["board"][idx] == "AI":
+                g["board"][idx] = " "
+                g["burned_ai"] += 1
+                g["mode"] = "place"
+                await query.answer("ایول! مهره حریف سوخت و رفت توی دایره مرکز! 🔥", show_alert=True)
+            else:
+                await query.answer("دستت درد نکنه رفیق! ولی باید روی مهره قرمز حریف بزنی تا بسوزه! 😉", show_alert=True)
                 return
-        else:
-            end_kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 شروع مجدد بازی (/start)", callback_data="main_menu")]
-            ])
-            await query.edit_message_text(
-                "🤝 **یک نبرد برابر! بازی مساوی شد.**\n\nبرای بازی دوباره روی دکمه زیر کلیک کنید:",
-                reply_markup=end_kb,
-                parse_mode="Markdown"
-            )
-            return
+
+        # حالت اول: چیدن اولیه ۹ مهره
+        elif g["hand_p"] > 0:
+            if g["board"][idx] != " ":
+                await query.answer("اونجا که قبلاً مهره گذاشتی رفیق! یه نقطه خالی انتخاب کن 😄", show_alert=True)
+                return
+            
+            # گذاشتن مهره کاربر
+            g["board"][idx] = "P"
+            g["hand_p"] -= 1
+
+            # چک کردن قطار کاربر
+            if check_mill(g["board"], idx, "P"):
+                g["mode"] = "burn"
+                await query.answer("ماشالله! قطار ساختی 🚂 حالا روی یکی از مهره‌های قرمز حریف بزن تا بسوزه!", show_alert=True)
+            else:
+                # حرکت هوش مصنوعی
+                empty_spots = [i for i, val in enumerate(g["board"]) if val == " "]
+                if g["hand_ai"] > 0 and empty_spots:
+                    ai_move = random.choice(empty_spots)
+                    g["board"][ai_move] = "AI"
+                    g["hand_ai"] -= 1
+                await query.answer()
 
         await query.edit_message_text(
-            "🎮 **نوبت شماست!** (مهره شما: 🟦 / مهره هوش مصنوعی: 🟥)",
-            reply_markup=render_board_3x3(game["board"], "ai_cell")
+            "🎮 **نوبت بازی:** مهره‌هات رو روی نقاط خالی چیدمان کن!",
+            reply_markup=create_board_markup(g["board"], g["hand_p"], g["hand_ai"], g["burned_p"], g["burned_ai"])
         )
 
-# دریافت کد ۴ رقمی
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get("awaiting_code"):
-        code = update.message.text.strip().upper()
-        if code in rooms:
-            context.user_data["awaiting_code"] = False
-            await update.message.reply_text(f"✅ با موفقیت وارد اتاق `{code}` شدید! منتظر شروع...", parse_mode="Markdown")
-        else:
-            await update.message.reply_text("❌ کد وارد شده معتبر نیست! دوباره تلاش کنید.")
-
-def check_winner(b):
-    lines = [(0,1,2), (3,4,5), (6,7,8), (0,3,6), (1,4,7), (2,5,8), (0,4,8), (2,4,6)]
-    for a, bb, c in lines:
-        if b[a] == b[bb] == b[c] and b[a] != " ":
-            return b[a]
-    return None
+def check_mill(board, idx, player):
+    for m in MILLS:
+        if idx in m and board[m[0]] == board[m[1]] == board[m[2]] == player:
+            return True
+    return False
 
 if __name__ == "__main__":
     TOKEN = os.environ.get("BOT_TOKEN")
     Thread(target=run_web).start()
-    
     if TOKEN:
         app = Application.builder().token(TOKEN).build()
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CallbackQueryHandler(button_handler))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         app.run_polling()
