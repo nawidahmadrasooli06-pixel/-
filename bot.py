@@ -11,118 +11,66 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 app_web = Flask(__name__)
 
-# حافظه اتاق‌های بازی دو نفره
-rooms = {}
-
-# رابط گرافیکی پیشرفته، مینیمال و انیمیشنی (Mini App)
 HTML_GAME = """
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>بازی نهره‌گک</title>
+    <title>بازی سنتی</title>
     <style>
-        * { box-sizing: border-box; user-select: none; }
+        * { box-sizing: border-box; user-select: none; margin: 0; padding: 0; }
         body {
             background: linear-gradient(135deg, #0f172a, #1e293b);
             color: #f8fafc;
             font-family: 'Segoe UI', Tahoma, sans-serif;
             text-align: center;
-            margin: 0;
             padding: 12px;
             overflow: hidden;
         }
-        .header-title {
-            font-size: 18px;
-            font-weight: bold;
-            color: #38bdf8;
-            margin-bottom: 8px;
-        }
+        .header-title { font-size: 17px; font-weight: bold; color: #38bdf8; margin-bottom: 8px; }
         #status-bar {
-            background: rgba(30, 41, 59, 0.8);
+            background: rgba(30, 41, 59, 0.9);
             border: 1px solid #334155;
             padding: 8px 12px;
             border-radius: 10px;
             font-size: 13px;
             color: #e2e8f0;
             margin-bottom: 12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         }
-        
-        /* مخزن مهره‌ها */
-        .pouches-container {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            max-width: 360px;
-            margin: 0 auto 10px auto;
-            background: rgba(15, 23, 42, 0.6);
-            padding: 8px 12px;
-            border-radius: 12px;
-            border: 1px solid #1e293b;
+        .pouches {
+            display: flex; justify-content: space-between; align-items: center;
+            max-width: 340px; margin: 0 auto 10px auto;
+            background: rgba(15, 23, 42, 0.6); padding: 8px 12px; border-radius: 12px;
         }
-        .pouch-box {
-            display: flex;
-            gap: 4px;
-            flex-wrap: wrap;
-            max-width: 140px;
-        }
-        
-        /* مهره‌های ریزتر و شیک */
+        .pouch-box { display: flex; gap: 4px; flex-wrap: wrap; max-width: 140px; }
         .piece {
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
+            width: 16px; height: 16px; border-radius: 50%;
             box-shadow: 0 2px 4px rgba(0,0,0,0.4);
-            transition: all 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+            transition: all 0.3s;
         }
-        .piece.blue { background: radial-gradient(circle at 5px 5px, #38bdf8, #0284c7); }
-        .piece.red { background: radial-gradient(circle at 5px 5px, #f43f5e, #be123c); }
-
-        /* تخته بزرگ و مینیمال */
+        .piece.blue { background: radial-gradient(circle at 4px 4px, #38bdf8, #0284c7); }
+        .piece.red { background: radial-gradient(circle at 4px 4px, #f43f5e, #be123c); }
         #board-wrapper {
-            position: relative;
-            width: 340px;
-            height: 340px;
-            margin: 0 auto;
-            background: #090d16;
-            border-radius: 20px;
-            border: 2px solid #334155;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-            padding: 10px;
+            position: relative; width: 330px; height: 330px; margin: 0 auto;
+            background: #090d16; border-radius: 20px; border: 2px solid #334155;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5); padding: 10px;
         }
         svg { width: 100%; height: 100%; }
-        line, rect { stroke: #64748b; stroke-width: 2; fill: none; }
-        
-        /* نقطه‌های ریز دکمه‌ای */
+        line, rect { stroke: #64748b; stroke-width: 2.5; fill: none; }
         circle.spot {
-            fill: #38bdf8;
-            r: 6;
-            cursor: pointer;
-            transition: transform 0.2s, fill 0.2s;
+            fill: #facc15; stroke: #090d16; stroke-width: 2; r: 9;
+            cursor: pointer; transition: all 0.2s;
         }
-        circle.spot:hover {
-            fill: #facc15;
-            r: 8;
-        }
-        
-        /* دایره مرکز سوخته‌ها */
-        circle.center-burn-ring {
-            fill: rgba(244, 63, 94, 0.08);
-            stroke: #f43f5e;
-            stroke-dasharray: 4;
-            stroke-width: 1.5;
-        }
+        circle.spot:hover { fill: #38bdf8; r: 11; }
+        circle.center-burn { fill: rgba(244, 63, 94, 0.1); stroke: #f43f5e; stroke-dasharray: 4; stroke-width: 1.5; }
     </style>
 </head>
 <body>
+    <div class="header-title" id="game-title">🎲 تخته سنتی (۲ نفره)</div>
+    <div id="status-bar">💡 روی هر نقطه‌ای که می‌خوای مهره‌ت بذاری کلیک کن.</div>
 
-    <div class="header-title">🎲 تخته سنتی نهره‌گک (۲ نفره)</div>
-    <div id="status-bar">💡 رفیق! روی هر نقطه‌ای که می‌خوای مهره‌ت بذاری کلیک کن.</div>
-
-    <!-- مخزن مهره‌های آبی (شما) و قرمز (حریف) -->
-    <div class="pouches-container">
+    <div class="pouches">
         <div>
             <div style="font-size: 11px; margin-bottom:3px; color:#38bdf8;">دست شما (آبی):</div>
             <div class="pouch-box" id="pouch-blue"></div>
@@ -133,25 +81,17 @@ HTML_GAME = """
         </div>
     </div>
 
-    <!-- تخته اصلی با انیمیشن کشویی -->
     <div id="board-wrapper">
         <svg viewBox="0 0 300 300" id="svg-board">
-            <!-- ۳ مربع اصلی -->
             <rect x="20" y="20" width="260" height="260" rx="6" />
             <rect x="60" y="60" width="180" height="180" rx="4" />
             <rect x="100" y="100" width="100" height="100" rx="2" />
-
-            <!-- خطوط رابط وسط -->
             <line x1="150" y1="20" x2="150" y2="100" />
             <line x1="150" y1="200" x2="150" y2="280" />
             <line x1="20" y1="150" x2="100" y2="150" />
             <line x1="200" y1="150" x2="280" y2="150" />
+            <circle cx="150" cy="150" r="28" class="center-burn" />
 
-            <!-- خانه مرکز (مهره‌های سوخته) -->
-            <circle cx="150" cy="150" r="28" class="center-burn-ring" />
-
-            <!-- ۲۴ نقطه ریز اصلی روی تخته -->
-            <!-- مربع بیرونی -->
             <circle cx="20" cy="20" class="spot" data-id="0" />
             <circle cx="150" cy="20" class="spot" data-id="1" />
             <circle cx="280" cy="20" class="spot" data-id="2" />
@@ -160,8 +100,6 @@ HTML_GAME = """
             <circle cx="150" cy="280" class="spot" data-id="5" />
             <circle cx="20" cy="280" class="spot" data-id="6" />
             <circle cx="20" cy="150" class="spot" data-id="7" />
-
-            <!-- مربع میانی -->
             <circle cx="60" cy="60" class="spot" data-id="8" />
             <circle cx="150" cy="60" class="spot" data-id="9" />
             <circle cx="240" cy="60" class="spot" data-id="10" />
@@ -170,8 +108,6 @@ HTML_GAME = """
             <circle cx="150" cy="240" class="spot" data-id="13" />
             <circle cx="60" cy="240" class="spot" data-id="14" />
             <circle cx="60" cy="150" class="spot" data-id="15" />
-
-            <!-- مربع کوچک -->
             <circle cx="100" cy="100" class="spot" data-id="16" />
             <circle cx="150" cy="100" class="spot" data-id="17" />
             <circle cx="200" cy="100" class="spot" data-id="18" />
@@ -186,21 +122,11 @@ HTML_GAME = """
     <script>
         const pBlue = document.getElementById('pouch-blue');
         const pRed = document.getElementById('pouch-red');
-
         for(let i=0; i<9; i++){
-            let b = document.createElement('div');
-            b.className = 'piece blue';
-            b.id = 'blue-' + i;
-            pBlue.appendChild(b);
-
-            let r = document.createElement('div');
-            r.className = 'piece red';
-            r.id = 'red-' + i;
-            pRed.appendChild(r);
+            let b = document.createElement('div'); b.className = 'piece blue'; b.id = 'blue-' + i; pBlue.appendChild(b);
+            let r = document.createElement('div'); r.className = 'piece red'; r.id = 'red-' + i; pRed.appendChild(r);
         }
-
         let blueCount = 0;
-
         document.querySelectorAll('.spot').forEach(spot => {
             spot.addEventListener('click', function() {
                 if(blueCount < 9 && this.getAttribute('data-filled') !== 'true') {
@@ -208,7 +134,6 @@ HTML_GAME = """
                     if(piece) {
                         this.setAttribute('data-filled', 'true');
                         this.style.fill = "#38bdf8";
-                        this.style.r = "8";
                         piece.style.opacity = "0.2";
                         blueCount++;
                         document.getElementById('status-bar').innerText = "حرکت عالی بود! نوبت مهره بعدی.";
@@ -222,42 +147,35 @@ HTML_GAME = """
 """
 
 @app_web.route('/')
-def home():
-    return "Bot Server Active!"
+def home(): return "Bot Server Active!"
 
 @app_web.route('/game')
-def game():
-    return render_template_string(HTML_GAME)
+def game(): return render_template_string(HTML_GAME)
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     app_web.run(host='0.0.0.0', port=port)
 
-# متن بخش درباره سازنده
 ABOUT_TEXT = (
-    "🎮 **ربات بازی هیجان‌انگیز نهره‌گک**\n\n"
-    "👨‍💻 **طراحی و توسعه‌یافته توسط:** 〘Cactuc = نــوید\n"
-    "🆔 @cactuc580\n\n"
-    "💡 *اگر نظر، پیشنهاد یا ایده‌ای برای بهتر شدن بازی داشتید، می‌توانید با من در میان بگذارید.*\n\n"
-    "📌 *این ربات گیمینگ صرفاً برای سرگرمی و خوش‌گذشتن شما عزیزان ساخته شده است. امیدوارم نهایت لذت را ببرید! ❤️*"
+    "🎮 **ربات جامع بازی‌های سنتی**\n\n"
+    "این ربات شامل بازی‌های اصیل و خاطره‌انگیز نهره‌گک (۹‌ریگک) و سه‌ریگک به صورت ۲‌نفره گرافیکی است.\n\n"
+    "💡 *امیدواریم از بازی لذت ببرید!*"
 )
 
-# منوی اصلی و تمیز بازی
 def get_main_menu():
-    web_app_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'game-nawid.onrender.com')}/game"
+    host = os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'game-nawid.onrender.com')
+    web_app_url = f"https://{host}/game"
     
     kb = [
-        [InlineKeyboardButton("🤖 بازی با کامپیوتر (۲ نفره)", web_app=WebAppInfo(url=web_app_url))],
-        [InlineKeyboardButton("👥 بازی با دوستان (۲ نفره با کد)", callback_data="friend_menu")],
-        [InlineKeyboardButton("ℹ️ درباره سازنده (نوید)", callback_data="about")]
+        [InlineKeyboardButton("🤖 بازی با کامپیوتر (نهره‌گک)", web_app=WebAppInfo(url=web_app_url))],
+        [InlineKeyboardButton("❌ بازی سه‌ریگک (۳‌ریگک)", web_app=WebAppInfo(url=web_app_url)), InlineKeyboardButton("👥 بازی با دوستان (کد)", callback_data="friend_menu")],
+        [InlineKeyboardButton("📖 راهنمای بازی", callback_data="help"), InlineKeyboardButton("⚙️ تنظیمات / Settings", callback_data="settings")],
+        [InlineKeyboardButton("ℹ️ درباره ربات", callback_data="about")]
     ]
     return InlineKeyboardMarkup(kb)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "سلام رفیق! به منوی اصلی بازی نهره‌گک خوش اومدی. لطفاً گزینه مورد نظرت رو انتخاب کن: 👇",
-        reply_markup=get_main_menu()
-    )
+    await update.message.reply_text("سلام رفیق! به منوی اصلی بازی خوش آمدی. لطفاً گزینه مورد نظرت را انتخاب کن: 👇", reply_markup=get_main_menu())
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -278,39 +196,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("➕ ساخت کد اتاق جدید", callback_data="create_room")],
             [InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="main_menu")]
         ]
-        await query.edit_message_text(
-            "👥 **بخش بازی دو نفره با دوستان:**\n\n"
-            "می‌تونی یک کد اتاق بسازی و به دوستت بدی تا دو نفره با هم بازی کنین!",
-            reply_markup=InlineKeyboardMarkup(kb),
-            parse_mode="Markdown"
-        )
+        await query.edit_message_text("👥 **بخش بازی دو نفره با دوستان:**\n\nکد اتاق بسازید و برای دوستتان ارسال کنید!", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
 
     elif data == "create_room":
         await query.answer()
         room_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
-        web_app_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'game-nawid.onrender.com')}/game?room={room_code}"
-        
-        kb = [
-            [InlineKeyboardButton("🎮 ورود به تخته اتاق", web_app=WebAppInfo(url=web_app_url))],
-            [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="main_menu")]
-        ]
-        await query.edit_message_text(
-            f"🔑 **کد اتاق ۲ نفره شما:** `{room_code}`\n\n"
-            "این کد را به دوستت بده تا وارد بشه، یا هر دو روی دکمه زیر بزنید و بازی رو شروع کنید! 🔥",
-            reply_markup=InlineKeyboardMarkup(kb),
-            parse_mode="Markdown"
-        )
+        host = os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'game-nawid.onrender.com')
+        web_app_url = f"https://{host}/game?room={room_code}"
+        kb = [[InlineKeyboardButton("🎮 ورود به اتاق ۲ نفره", web_app=WebAppInfo(url=web_app_url))]]
+        await query.edit_message_text(f"🔑 **کد اتاق:** `{room_code}`\n\nروی دکمه زیر بزنید و وارد شوید!", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
 
-async def post_init(application: Application):
-    await application.bot.set_my_commands([
-        BotCommand("start", "باز کردن منوی اصلی 🎮")
-    ])
+    elif data in ["help", "settings"]:
+        await query.answer("این بخش فعال است!", show_alert=True)
 
 if __name__ == "__main__":
     TOKEN = os.environ.get("BOT_TOKEN")
     Thread(target=run_web).start()
     if TOKEN:
-        app = Application.builder().token(TOKEN).post_init(post_init).build()
+        app = Application.builder().token(TOKEN).build()
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CallbackQueryHandler(button_handler))
         app.run_polling()
