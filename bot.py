@@ -18,6 +18,7 @@ HTML_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>👑 نبرد حماسی نه‌رگک</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
         body {
@@ -33,7 +34,19 @@ HTML_TEMPLATE = """
         }
         .header { text-align: center; margin-bottom: 8px; }
         .title { font-size: 20px; font-weight: bold; color: #38bdf8; margin-bottom: 4px; }
-        .status { font-size: 12px; color: #f1f5f9; background: #1e293b; padding: 6px 14px; border-radius: 20px; border: 1px solid #38bdf8; min-height: 32px; display: flex; align-items: center; justify-content: center; }
+        .status { 
+            font-size: 12px; 
+            color: #f1f5f9; 
+            background: #1e293b; 
+            padding: 6px 14px; 
+            border-radius: 20px; 
+            border: 1px solid #38bdf8; 
+            min-height: 36px; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center;
+            text-align: center;
+        }
         
         .hands {
             display: flex;
@@ -46,7 +59,8 @@ HTML_TEMPLATE = """
             border-radius: 12px;
         }
         .hand-box { text-align: center; }
-        .hand-title { font-size: 11px; color: #94a3b8; margin-bottom: 4px; }
+        .hand-title { font-size: 12px; font-weight: bold; color: #38bdf8; margin-bottom: 4px; }
+        .hand-title.red { color: #ef4444; }
         .pieces-container { display: flex; gap: 3px; flex-wrap: wrap; max-width: 110px; }
         .piece-icon { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
         .piece-icon.blue { background: #00d2ff; box-shadow: 0 0 5px #00d2ff; }
@@ -64,8 +78,7 @@ HTML_TEMPLATE = """
         }
         
         .board-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-        .board-svg line, .board-svg rect, .board-svg circle { stroke: #64748b; stroke-width: 2.5; fill: none; }
-        .board-svg circle.center-ring { stroke: #ef4444; stroke-width: 1.5; stroke-dasharray: 3; }
+        .board-svg line, .board-svg rect { stroke: #64748b; stroke-width: 2.5; fill: none; }
 
         .point {
             position: absolute;
@@ -139,22 +152,51 @@ HTML_TEMPLATE = """
             cursor: pointer;
             box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
         }
+
+        /* WINNER MODAL */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(15, 23, 42, 0.85);
+            z-index: 100;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            text-align: center;
+        }
+        .modal-content {
+            background: #1e293b;
+            border: 2px solid #facc15;
+            border-radius: 16px;
+            padding: 24px;
+            max-width: 320px;
+            box-shadow: 0 0 25px rgba(250, 204, 21, 0.4);
+            animation: popIn 0.4s ease-out;
+        }
+        @keyframes popIn {
+            0% { transform: scale(0.5); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .winner-title { font-size: 22px; font-weight: bold; color: #facc15; margin-bottom: 12px; }
+        .winner-msg { font-size: 14px; color: #f8fafc; line-height: 1.6; margin-bottom: 18px; }
     </style>
 </head>
 <body>
 
     <div class="header">
         <div class="title">👑 نبرد حماسی نه‌رگک</div>
-        <div class="status" id="status-text">نوبت شماست (آبی) - مهره بگذارید</div>
+        <div class="status" id="status-text">شروع بازی...</div>
     </div>
 
     <div class="hands">
         <div class="hand-box">
-            <div class="hand-title">دست شما (آبی): <span id="blue-count">9</span></div>
+            <div class="hand-title" id="player-name-display">آبی: 9</div>
             <div class="pieces-container" id="blue-hand"></div>
         </div>
         <div class="hand-box">
-            <div class="hand-title">کامپیوتر (قرمز): <span id="red-count">9</span></div>
+            <div class="hand-title red">کامپیوتر: 9</div>
             <div class="pieces-container" id="red-hand"></div>
         </div>
     </div>
@@ -175,9 +217,20 @@ HTML_TEMPLATE = """
 
     <button class="btn-reset" onclick="resetGame()">شروع مجدد بازی</button>
 
+    <!-- WINNER MODAL -->
+    <div class="modal" id="winner-modal">
+        <div class="modal-content">
+            <div class="winner-title">🎉 پایان بازی 🎉</div>
+            <div class="winner-msg" id="winner-text"></div>
+            <button class="btn-reset" onclick="closeModalAndReset()">شروع مجدد بازی</button>
+        </div>
+    </div>
+
     <script>
         const tg = window.Telegram?.WebApp;
         if (tg) tg.expand();
+
+        let playerName = prompt("لطفاً نام خود را برای بازی وارد کنید:", "نوید") || "نوید";
 
         const POINTS = [
             {id: 0, x: 20, y: 20}, {id: 1, x: 170, y: 20}, {id: 2, x: 320, y: 20},
@@ -207,13 +260,17 @@ HTML_TEMPLATE = """
             selectedPoint: null,
             isRemoving: false,
             killedBlue: 0,
-            killedRed: 0
+            killedRed: 0,
+            formedMillsBlue: [],
+            formedMillsRed: [],
+            gameOver: false
         };
 
         const boardEl = document.getElementById('board');
         const statusText = document.getElementById('status-text');
 
         function initBoard() {
+            document.getElementById('player-name-display').innerText = `${playerName} (آبی)`;
             POINTS.forEach(pt => {
                 const pDiv = document.createElement('div');
                 pDiv.className = 'point';
@@ -223,6 +280,7 @@ HTML_TEMPLATE = """
                 pDiv.onclick = () => handlePointClick(pt.id);
                 boardEl.appendChild(pDiv);
             });
+            setStatus(`نوبت شماست (${playerName}) - مهره بگذارید`);
             updateUI();
         }
 
@@ -233,9 +291,6 @@ HTML_TEMPLATE = """
             rHand.innerHTML = '';
             for(let i=0; i<state.blueHand; i++) bHand.appendChild(createPieceIcon('blue'));
             for(let i=0; i<state.redHand; i++) rHand.appendChild(createPieceIcon('red'));
-            
-            document.getElementById('blue-count').innerText = state.blueHand;
-            document.getElementById('red-count').innerText = state.redHand;
 
             const graveyard = document.getElementById('graveyard');
             graveyard.innerHTML = '';
@@ -269,14 +324,6 @@ HTML_TEMPLATE = """
                     ptEl.appendChild(piece);
                 }
             });
-
-            if (state.isRemoving) {
-                statusText.innerText = "🔥 قطار ساخته شد! یکی از مهره‌های قرمز حریف را لمس کنید تا بسوزد.";
-            } else if (state.turn === 'blue') {
-                statusText.innerText = state.phase === 'place' ? "نوبت شماست: نقطه خالی را لمس کنید" : "نوبت شماست: مهره را جابه‌جا کنید";
-            } else {
-                statusText.innerText = "تفکر هوش مصنوعی...";
-            }
         }
 
         function createPieceIcon(color) {
@@ -285,15 +332,53 @@ HTML_TEMPLATE = """
             return d;
         }
 
+        function setStatus(msg) {
+            statusText.innerText = msg;
+        }
+
+        function checkWinCondition() {
+            if (state.phase !== 'move') return false;
+
+            let blueRemaining = POINTS.filter(p => state.board[p.id] === 'blue').length;
+            let redRemaining = POINTS.filter(p => state.board[p.id] === 'red').length;
+
+            if (state.killedRed >= 7 || redRemaining <= 2) {
+                triggerWin(playerName, "آبی");
+                return true;
+            } else if (state.killedBlue >= 7 || blueRemaining <= 2) {
+                triggerWin("کامپیوتر", "قرمز");
+                return true;
+            }
+            return false;
+        }
+
+        function triggerWin(winnerName, pieceColor) {
+            state.gameOver = true;
+            confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
+            
+            document.getElementById('winner-text').innerHTML = `
+                🏆 <b>${winnerName}</b> با مهره <b>${pieceColor}</b> برنده این نبرد شد!<br><br>
+                لطفاً اگر می‌خواهید دوباره بازی کنید، روی دکمه زیر کلیک کنید.
+            `;
+            document.getElementById('winner-modal').style.display = 'flex';
+        }
+
+        function closeModalAndReset() {
+            document.getElementById('winner-modal').style.display = 'none';
+            resetGame();
+        }
+
         function handlePointClick(id) {
-            if (state.turn !== 'blue') return;
+            if (state.gameOver || state.turn !== 'blue') return;
 
             if (state.isRemoving) {
                 if (state.board[id] === 'red') {
                     state.board[id] = null;
                     state.killedRed++;
                     state.isRemoving = false;
-                    switchTurn();
+                    if (!checkWinCondition()) {
+                        switchTurn();
+                    }
                 }
                 updateUI();
                 return;
@@ -302,8 +387,12 @@ HTML_TEMPLATE = """
             if (state.phase === 'place') {
                 if (state.board[id] === null && state.blueHand > 0) {
                     state.board[id] = 'blue';
+                    if (checkNewMill(id, 'blue')) {
+                        state.board[id] = null;
+                        setStatus("⚠️ ساخت قطار قبل از اتمام تمام مهره‌ها مجاز نیست!");
+                        return;
+                    }
                     state.blueHand--;
-                    
                     checkPhase();
                     switchTurn();
                 }
@@ -316,13 +405,17 @@ HTML_TEMPLATE = """
                     if (state.board[id] === null) {
                         state.board[id] = 'blue';
                         state.board[state.selectedPoint] = null;
-                        const createdMill = checkMillCreated(id, 'blue');
+                        
+                        const isNewMill = checkNewMill(id, 'blue');
                         state.selectedPoint = null;
 
-                        if (createdMill) {
+                        if (isNewMill) {
                             state.isRemoving = true;
+                            setStatus("🔥 قطار جدید ساخته شد! یکی از مهره‌های قرمز را بسوزانید.");
                         } else {
-                            switchTurn();
+                            if (!checkWinCondition()) {
+                                switchTurn();
+                            }
                         }
                     } else if (state.board[id] === 'blue') {
                         state.selectedPoint = id;
@@ -332,8 +425,19 @@ HTML_TEMPLATE = """
             updateUI();
         }
 
-        function checkMillCreated(ptId, color) {
-            return MILLS.some(mill => mill.includes(ptId) && mill.every(p => state.board[p] === color));
+        function checkNewMill(ptId, color) {
+            let newlyFormed = false;
+            MILLS.forEach(mill => {
+                if (mill.includes(ptId) && mill.every(p => state.board[p] === color)) {
+                    let millKey = mill.sort().join('-');
+                    let formedList = color === 'blue' ? state.formedMillsBlue : state.formedMillsRed;
+                    if (!formedList.includes(millKey)) {
+                        formedList.push(millKey);
+                        newlyFormed = true;
+                    }
+                }
+            });
+            return newlyFormed;
         }
 
         function checkPhase() {
@@ -343,7 +447,11 @@ HTML_TEMPLATE = """
         }
 
         function switchTurn() {
+            if (state.gameOver) return;
             state.turn = state.turn === 'blue' ? 'red' : 'blue';
+            if (!state.isRemoving) {
+                setStatus(state.turn === 'blue' ? (state.phase === 'place' ? `نوبت ${playerName}: نقطه خالی را لمس کنید` : `نوبت ${playerName}: مهره را جابه‌جا کنید`) : "تفکر هوش مصنوعی قوی...");
+            }
             updateUI();
             if (state.turn === 'red') {
                 setTimeout(aiMove, 600);
@@ -351,44 +459,67 @@ HTML_TEMPLATE = """
         }
 
         function aiMove() {
+            if (state.gameOver) return;
+
             if (state.phase === 'place' && state.redHand > 0) {
                 let emptyPoints = POINTS.map(p => p.id).filter(id => state.board[id] === null);
-                
-                // Block Player's Potential Mill
-                let blockPt = null;
+                let targetPt = null;
+
                 for (let mill of MILLS) {
                     let blueInMill = mill.filter(p => state.board[p] === 'blue').length;
                     let emptyInMill = mill.filter(p => state.board[p] === null);
                     if (blueInMill === 2 && emptyInMill.length === 1) {
-                        blockPt = emptyInMill[0];
+                        targetPt = emptyInMill[0];
                         break;
                     }
                 }
 
-                let targetPt = blockPt !== null ? blockPt : emptyPoints[Math.floor(Math.random() * emptyPoints.length)];
+                if (targetPt === null) {
+                    targetPt = emptyPoints[Math.floor(Math.random() * emptyPoints.length)];
+                }
+
                 state.board[targetPt] = 'red';
                 state.redHand--;
             } else {
                 let redPieces = POINTS.map(p => p.id).filter(id => state.board[id] === 'red');
                 let emptyPoints = POINTS.map(p => p.id).filter(id => state.board[id] === null);
+                
                 if (redPieces.length > 0 && emptyPoints.length > 0) {
-                    let from = redPieces[Math.floor(Math.random() * redPieces.length)];
-                    let to = emptyPoints[Math.floor(Math.random() * emptyPoints.length)];
-                    state.board[from] = null;
-                    state.board[to] = 'red';
-
-                    if (checkMillCreated(to, 'red')) {
-                        let bluePiecesOnBoard = POINTS.map(p => p.id).filter(id => state.board[id] === 'blue');
-                        if (bluePiecesOnBoard.length > 0) {
-                            let killTarget = bluePiecesOnBoard[Math.floor(Math.random() * bluePiecesOnBoard.length)];
-                            state.board[killTarget] = null;
-                            state.killedBlue++;
+                    let moved = false;
+                    for (let f of redPieces) {
+                        for (let t of emptyPoints) {
+                            state.board[f] = null;
+                            state.board[t] = 'red';
+                            if (checkNewMill(t, 'red')) {
+                                moved = true;
+                                let bluePiecesOnBoard = POINTS.map(p => p.id).filter(id => state.board[id] === 'blue');
+                                if (bluePiecesOnBoard.length > 0) {
+                                    let killTarget = bluePiecesOnBoard[Math.floor(Math.random() * bluePiecesOnBoard.length)];
+                                    state.board[killTarget] = null;
+                                    state.killedBlue++;
+                                }
+                                break;
+                            }
+                            state.board[f] = 'red';
+                            state.board[t] = null;
                         }
+                        if (moved) break;
+                    }
+
+                    if (!moved) {
+                        let from = redPieces[Math.floor(Math.random() * redPieces.length)];
+                        let to = emptyPoints[Math.floor(Math.random() * emptyPoints.length)];
+                        state.board[from] = null;
+                        state.board[to] = 'red';
                     }
                 }
             }
+
             checkPhase();
-            state.turn = 'blue';
+            if (!checkWinCondition()) {
+                state.turn = 'blue';
+                setStatus(state.phase === 'place' ? `نوبت ${playerName}: نقطه خالی را لمس کنید` : `نوبت ${playerName}: مهره را جابه‌جا کنید`);
+            }
             updateUI();
         }
 
@@ -402,8 +533,12 @@ HTML_TEMPLATE = """
                 selectedPoint: null,
                 isRemoving: false,
                 killedBlue: 0,
-                killedRed: 0
+                killedRed: 0,
+                formedMillsBlue: [],
+                formedMillsRed: [],
+                gameOver: false
             };
+            setStatus(`نوبت شماست (${playerName}) - مهره بگذارید`);
             updateUI();
         }
 
@@ -477,7 +612,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'selected': None
         }
         await query.message.reply_text(
-            "⚔️ **بازی سه‌رگک (مربع کوچیک ۳x۳):**\n\n🔹 **مرحله ۱:** مهره‌های خود (❌) را در خانه‌های خالی بنشانید.",
+            "⚔️ **بازی سه‌رگک:**\n\n🔹 **مرحله ۱:** مهره‌های خود (❌) را در خانه‌های خالی بنشانید.",
             reply_markup=get_serekak_keyboard(serekak_games[user_id]['board']),
             parse_mode='Markdown'
         )
@@ -501,7 +636,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 game['x_count'] += 1
 
                 if check_win(board, 'X'):
-                    await query.edit_message_text("🎉 **تبریک! شما هوش مصنوعی قدرتمند را شکست دادید!**", reply_markup=get_serekak_keyboard(board), parse_mode='Markdown')
+                    await query.edit_message_text("🎉 **تبریک! شما برنده این نبرد شدید!**", reply_markup=get_serekak_keyboard(board), parse_mode='Markdown')
                     serekak_games.pop(user_id, None)
                     return
 
@@ -512,7 +647,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         game['o_count'] += 1
 
                 if check_win(board, 'O'):
-                    await query.edit_message_text("🤖 **هوش مصنوعی برنده شد! دوباره شانس خودت رو امتحان کن.**", reply_markup=get_serekak_keyboard(board), parse_mode='Markdown')
+                    await query.edit_message_text("🤖 **هوش مصنوعی برنده شد!**", reply_markup=get_serekak_keyboard(board), parse_mode='Markdown')
                     serekak_games.pop(user_id, None)
                     return
 
@@ -539,7 +674,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     game['selected'] = None
 
                     if check_win(board, 'X'):
-                        await query.edit_message_text("🚂🎉 **قطار کامل شد! شما برنده شدید!**", reply_markup=get_serekak_keyboard(board), parse_mode='Markdown')
+                        await query.edit_message_text("🎉 **قطار کامل شد! شما برنده این میدان شدید!**", reply_markup=get_serekak_keyboard(board), parse_mode='Markdown')
                         serekak_games.pop(user_id, None)
                         return
 
@@ -549,7 +684,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         board[ai_to] = 'O'
 
                     if check_win(board, 'O'):
-                        await query.edit_message_text("🤖🚂 **هوش مصنوعی قطار ساخت و برنده شد!**", reply_markup=get_serekak_keyboard(board), parse_mode='Markdown')
+                        await query.edit_message_text("🤖 **هوش مصنوعی برنده شد!**", reply_markup=get_serekak_keyboard(board), parse_mode='Markdown')
                         serekak_games.pop(user_id, None)
                         return
 
@@ -564,12 +699,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔑 ورود با کد اتاق", callback_data="join_room")],
             [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_main")]
         ]
-        await query.message.reply_text("👥 **بخش بازی با دوستان (دو نفره):**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+        await query.message.reply_text("👥 **بخش بازی با دوستان (دو نفره):**\nاتاق بسازید و کد آن را برای دوست خود بفرستید!", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
     elif data == "create_room":
         room_code = str(random.randint(1000, 9999))
         rooms[room_code] = {'host': user_id, 'guest': None}
-        await query.message.reply_text(f"🔑 **اتاق ساخته شد!**\nکد اتاق شما: `{room_code}`", parse_mode='Markdown')
+        await query.message.reply_text(f"🔑 **اتاق ساخته شد!**\nکد اتاق شما: `{room_code}`\nاین کد را به دوستت بده تا وارد اتاق شود.", parse_mode='Markdown')
 
     elif data == "join_room":
         user_states[user_id] = 'awaiting_room_code'
@@ -581,19 +716,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⚔️ **بازی سه‌رگک:**\n"
             "۳ مهره را جابه‌جا کنید تا قطار ساخته و برنده شوید.\n\n"
             "👑 **بازی نه‌رگک:**\n"
-            "در فاز جابه‌جایی با ساخت هر قطار (۳ مهره هم‌ردیف)، یک مهره حریف را می‌سوزانید و به دایره وسط منتقل می‌کنید!"
+            "در فاز جابه‌جایی با ساخت هر قطار جدید، یک مهره حریف را می‌سوزانید. زمانی که مهره‌های حریف به ۲ برسد، برنده اعلام می‌شوید!"
         )
         await query.message.reply_text(guide_text, parse_mode='Markdown')
 
     elif data == "settings":
-        await query.message.reply_text("⚙️ **تنظیمات:**\nدرجه سختی هوش مصنوعی روی **حالت هوشمند و فوق‌العاده قوی** تنظیم شده است.")
+        await query.message.reply_text("⚙️ **تنظیمات:**\nدرجه سختی هوش مصنوعی روی **سطح بسیار سخت** تنظیم شده است.")
 
     elif data == "about":
         about_text = (
             "🤖 **درباره ربات:**\n\n"
-            "خوش آمدی رفیق! این ربات با هدف ایجاد یک فضای کل‌کل و سرگرمی استراتژیک آنلاین و رقابت با هوش مصنوعی طراحی شده است 😉🔥\n\n"
-            "طراحی و توسعه با عشق توسط **نوید** ❤️\n"
-            "🆔 **آیدی پشتیبانی و ارتباط:** @nawidahmadrasooli06"
+            "خوش آمدی رفیق! این ربات با هدف ایجاد یک فضای کل‌کل و سرگرمی و خش گزرانی آنلاین و رقابت با رفیقات و هوش مصنوعی طراحی شده بزن بترکون (بترقون)😂🔥\n\n"
+            "طراحی و ساخت بات\n"
+            "〘Cactuc = نــوید\n"
+            "@cactuc580"
         )
         await query.message.reply_text(about_text)
 
@@ -608,7 +744,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if text in rooms:
             rooms[text]['guest'] = user_id
             user_states.pop(user_id, None)
-            await update.message.reply_text(f"✅ با موفقیت وارد اتاق `{text}` شدید!", parse_mode='Markdown')
+            await update.message.reply_text(f"✅ با موفقیت وارد اتاق `{text}` شدید! بازی آنلاین شروع شد.", parse_mode='Markdown')
         else:
             await update.message.reply_text("❌ کد اتاق اشتباه است. دوباره وارد کنید:")
 
