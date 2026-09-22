@@ -1,4 +1,6 @@
 import os
+import random
+import string
 import logging
 from threading import Thread
 from flask import Flask, render_template_string
@@ -8,6 +10,9 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 app_web = Flask(__name__)
+
+# حافظه اتاق‌های بازی دو نفره
+rooms = {}
 
 # رابط گرافیکی پیشرفته، مینیمال و انیمیشنی (Mini App)
 HTML_GAME = """
@@ -78,8 +83,8 @@ HTML_GAME = """
         /* تخته بزرگ و مینیمال */
         #board-wrapper {
             position: relative;
-            width: 350px;
-            height: 350px;
+            width: 340px;
+            height: 340px;
             margin: 0 auto;
             background: #090d16;
             border-radius: 20px;
@@ -179,7 +184,6 @@ HTML_GAME = """
     </div>
 
     <script>
-        // ساخت ۹ مهره برای هر دو طرف در مخزن
         const pBlue = document.getElementById('pouch-blue');
         const pRed = document.getElementById('pouch-red');
 
@@ -197,7 +201,6 @@ HTML_GAME = """
 
         let blueCount = 0;
 
-        // کلیک روی نقطه‌ها برای سریدن آروم مهره
         document.querySelectorAll('.spot').forEach(spot => {
             spot.addEventListener('click', function() {
                 if(blueCount < 9 && this.getAttribute('data-filled') !== 'true') {
@@ -206,9 +209,9 @@ HTML_GAME = """
                         this.setAttribute('data-filled', 'true');
                         this.style.fill = "#38bdf8";
                         this.style.r = "8";
-                        piece.style.opacity = "0.3";
+                        piece.style.opacity = "0.2";
                         blueCount++;
-                        document.getElementById('status-bar').innerText = "حرکت عالی بود! نوبت مهره بعدیه.";
+                        document.getElementById('status-bar').innerText = "حرکت عالی بود! نوبت مهره بعدی.";
                     }
                 }
             });
@@ -239,22 +242,21 @@ ABOUT_TEXT = (
     "📌 *این ربات گیمینگ صرفاً برای سرگرمی و خوش‌گذشتن شما عزیزان ساخته شده است. امیدوارم نهایت لذت را ببرید! ❤️*"
 )
 
-# منوی کامل و چندگزینه‌ای اصیل تلگرام
-def get_full_main_menu():
+# منوی اصلی و تمیز بازی
+def get_main_menu():
     web_app_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'game-nawid.onrender.com')}/game"
     
     kb = [
-        [InlineKeyboardButton("🤖 بازی با ربات (تک‌نفره)", web_app=WebAppInfo(url=web_app_url))],
-        [InlineKeyboardButton("🌐 بازی آنلاین کشوری", callback_data="online_play"), InlineKeyboardButton("🔗 بازی با دوستان (کد / لینک)", callback_data="friend_play")],
-        [InlineKeyboardButton("🏆 جدول برترین‌ها", callback_data="leaderboard"), InlineKeyboardButton("⚙️ تنظیمات / Settings", callback_data="settings")],
+        [InlineKeyboardButton("🤖 بازی با کامپیوتر (۲ نفره)", web_app=WebAppInfo(url=web_app_url))],
+        [InlineKeyboardButton("👥 بازی با دوستان (۲ نفره با کد)", callback_data="friend_menu")],
         [InlineKeyboardButton("ℹ️ درباره سازنده (نوید)", callback_data="about")]
     ]
     return InlineKeyboardMarkup(kb)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "سلام رفیق! به منوی اصلی ربات بازی خوش اومدی. گزینه مورد نظرت رو انتخاب کن: 👇",
-        reply_markup=get_full_main_menu()
+        "سلام رفیق! به منوی اصلی بازی نهره‌گک خوش اومدی. لطفاً گزینه مورد نظرت رو انتخاب کن: 👇",
+        reply_markup=get_main_menu()
     )
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -268,15 +270,40 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "main_menu":
         await query.answer()
-        await query.edit_message_text("منوی اصلی بازی:", reply_markup=get_full_main_menu())
+        await query.edit_message_text("منوی اصلی بازی:", reply_markup=get_main_menu())
 
-    elif data in ["online_play", "friend_play", "leaderboard", "settings"]:
-        await query.answer("این بخش به‌زودی در آپدیت بعدی فعال میشه رفیق! 😉", show_alert=True)
+    elif data == "friend_menu":
+        await query.answer()
+        kb = [
+            [InlineKeyboardButton("➕ ساخت کد اتاق جدید", callback_data="create_room")],
+            [InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="main_menu")]
+        ]
+        await query.edit_message_text(
+            "👥 **بخش بازی دو نفره با دوستان:**\n\n"
+            "می‌تونی یک کد اتاق بسازی و به دوستت بدی تا دو نفره با هم بازی کنین!",
+            reply_markup=InlineKeyboardMarkup(kb),
+            parse_mode="Markdown"
+        )
 
-# ثبت دستور /start در کیبورد تلگرام
+    elif data == "create_room":
+        await query.answer()
+        room_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
+        web_app_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'game-nawid.onrender.com')}/game?room={room_code}"
+        
+        kb = [
+            [InlineKeyboardButton("🎮 ورود به تخته اتاق", web_app=WebAppInfo(url=web_app_url))],
+            [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="main_menu")]
+        ]
+        await query.edit_message_text(
+            f"🔑 **کد اتاق ۲ نفره شما:** `{room_code}`\n\n"
+            "این کد را به دوستت بده تا وارد بشه، یا هر دو روی دکمه زیر بزنید و بازی رو شروع کنید! 🔥",
+            reply_markup=InlineKeyboardMarkup(kb),
+            parse_mode="Markdown"
+        )
+
 async def post_init(application: Application):
     await application.bot.set_my_commands([
-        BotCommand("start", "شروع مجدد و باز کردن منوی اصلی 🎮")
+        BotCommand("start", "باز کردن منوی اصلی 🎮")
     ])
 
 if __name__ == "__main__":
