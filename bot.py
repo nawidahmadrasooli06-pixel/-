@@ -1,14 +1,19 @@
 import os
-import json
 import random
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, request
+from flask_socketio import SocketIO, join_room, emit
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 # ==========================================
-# 1. WEB SERVER & MINI APP FOR NEHREGAK / SEREKAK
+# 1. SERVER & REAL-TIME MULTIPLAYER (SocketIO)
 # ==========================================
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'secret_game_key_123'
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# ذخیره وضعیت اتاق‌های آنلاین
+active_rooms = {}
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -16,8 +21,9 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>👑 نبرد استراتژیک آنلاین</title>
+    <title>👑 نبرد آنلاین دو نفره</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
@@ -33,185 +39,59 @@ HTML_TEMPLATE = """
             padding: 10px;
         }
         .header { text-align: center; margin-bottom: 8px; }
-        .title { font-size: 20px; font-weight: bold; color: #38bdf8; margin-bottom: 4px; }
+        .title { font-size: 18px; font-weight: bold; color: #38bdf8; margin-bottom: 4px; }
         .status { 
-            font-size: 13px; 
-            color: #f1f5f9; 
-            background: #1e293b; 
-            padding: 8px 16px; 
-            border-radius: 20px; 
-            border: 1px solid #38bdf8; 
-            min-height: 40px; 
-            display: flex; 
-            align-items: center; 
-            justify-content: center;
-            text-align: center;
+            font-size: 13px; color: #f1f5f9; background: #1e293b; 
+            padding: 8px 16px; border-radius: 20px; border: 1px solid #38bdf8; 
+            min-height: 40px; display: flex; align-items: center; justify-content: center;
         }
-        
         .hands {
-            display: flex;
-            justify-content: space-between;
-            width: 100%;
-            max-width: 350px;
-            margin: 8px 0;
-            background: #1e293b;
-            padding: 8px 12px;
-            border-radius: 12px;
+            display: flex; justify-content: space-between; width: 100%; max-width: 340px;
+            margin: 8px 0; background: #1e293b; padding: 8px 12px; border-radius: 12px;
         }
         .hand-box { text-align: center; }
-        .hand-title { font-size: 12px; font-weight: bold; color: #38bdf8; margin-bottom: 4px; }
+        .hand-title { font-size: 12px; font-weight: bold; color: #38bdf8; }
         .hand-title.red { color: #ef4444; }
-        .pieces-container { display: flex; gap: 3px; flex-wrap: wrap; max-width: 110px; }
-        .piece-icon { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
-        .piece-icon.blue { background: #00d2ff; box-shadow: 0 0 5px #00d2ff; }
-        .piece-icon.red { background: #ff416c; box-shadow: 0 0 5px #ff416c; }
 
         .board-container {
-            position: relative;
-            width: 340px;
-            height: 340px;
-            background: #1e293b;
-            border-radius: 16px;
-            border: 2px solid #334155;
+            position: relative; width: 340px; height: 340px;
+            background: #1e293b; border-radius: 16px; border: 2px solid #334155;
             box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-            margin-top: 5px;
         }
-        
         .board-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
         .board-svg line, .board-svg rect { stroke: #64748b; stroke-width: 2.5; fill: none; }
 
         .point {
-            position: absolute;
-            width: 28px;
-            height: 28px;
-            border-radius: 50%;
-            background: rgba(255, 255, 255, 0.12);
-            border: 2px solid #38bdf8;
-            transform: translate(-50%, -50%);
-            z-index: 2;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s ease;
+            position: absolute; width: 28px; height: 28px; border-radius: 50%;
+            background: rgba(255, 255, 255, 0.12); border: 2px solid #38bdf8;
+            transform: translate(-50%, -50%); z-index: 2; cursor: pointer;
         }
-        .point.selected {
-            border-color: #facc15;
-            box-shadow: 0 0 16px #facc15;
-            background: rgba(250, 204, 21, 0.3);
-        }
-        .point.killable {
-            border-color: #ef4444;
-            box-shadow: 0 0 16px #ef4444;
-            animation: pulse 0.8s infinite;
-        }
-        .point.mill-highlight {
-            border-color: #facc15;
-            box-shadow: 0 0 20px #facc15;
-            animation: millPulse 0.6s infinite alternate;
-        }
+        .point.selected { border-color: #facc15; box-shadow: 0 0 16px #facc15; }
 
-        @keyframes pulse {
-            0% { transform: translate(-50%, -50%) scale(1); }
-            50% { transform: translate(-50%, -50%) scale(1.15); }
-            100% { transform: translate(-50%, -50%) scale(1); }
-        }
-        @keyframes millPulse {
-            0% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 8px #facc15; }
-            100% { transform: translate(-50%, -50%) scale(1.25); box-shadow: 0 0 22px #facc15; }
-        }
-
+        /* انیمیشن کشویی و نرم مهره‌ها */
         .board-piece {
-            position: absolute;
-            width: 22px;
-            height: 22px;
-            border-radius: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 3;
-            /* انیمیشن کشویی واقعی مهره‌ها */
-            transition: left 0.45s cubic-bezier(0.4, 0, 0.2, 1), top 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+            position: absolute; width: 22px; height: 22px; border-radius: 50%;
+            transform: translate(-50%, -50%); z-index: 3;
+            transition: left 0.5s cubic-bezier(0.25, 1, 0.5, 1), top 0.5s cubic-bezier(0.25, 1, 0.5, 1);
             pointer-events: none;
         }
         .board-piece.blue { background: #00d2ff; box-shadow: 0 0 10px #00d2ff; }
         .board-piece.red { background: #ff416c; box-shadow: 0 0 10px #ff416c; }
-
-        .graveyard {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 70px;
-            height: 70px;
-            border-radius: 50%;
-            border: 1.5px dashed #64748b;
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            justify-content: center;
-            gap: 2px;
-            padding: 4px;
-            z-index: 1;
-        }
-        .graveyard-piece { width: 10px; height: 10px; border-radius: 50%; }
-        .graveyard-piece.blue { background: #00d2ff; }
-        .graveyard-piece.red { background: #ff416c; }
-
-        .btn-reset {
-            margin-top: 14px;
-            padding: 10px 24px;
-            background: #ef4444;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-weight: bold;
-            cursor: pointer;
-            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
-        }
-
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(15, 23, 42, 0.88);
-            z-index: 100;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-            text-align: center;
-        }
-        .modal-content {
-            background: #1e293b;
-            border: 2px solid #facc15;
-            border-radius: 16px;
-            padding: 24px;
-            max-width: 320px;
-            box-shadow: 0 0 25px rgba(250, 204, 21, 0.4);
-            animation: popIn 0.4s ease-out;
-        }
-        @keyframes popIn {
-            0% { transform: scale(0.5); opacity: 0; }
-            100% { transform: scale(1); opacity: 1; }
-        }
-        .winner-title { font-size: 22px; font-weight: bold; color: #facc15; margin-bottom: 12px; }
-        .winner-msg { font-size: 14px; color: #f8fafc; line-height: 1.6; margin-bottom: 18px; }
     </style>
 </head>
 <body>
 
     <div class="header">
-        <div class="title" id="game-title">👑 نبرد حماسی نه‌رگک</div>
-        <div class="status" id="status-text">شروع بازی...</div>
+        <div class="title" id="game-title">⚔️ تخته آنلاین دو نفره</div>
+        <div class="status" id="status-text">در حال اتصال به سرور...</div>
     </div>
 
     <div class="hands">
         <div class="hand-box">
-            <div class="hand-title" id="player-name-display">آبی: 9</div>
-            <div class="pieces-container" id="blue-hand"></div>
+            <div class="hand-title" id="p1-display">بازیکن ۱ (آبی)</div>
         </div>
         <div class="hand-box">
-            <div class="hand-title red" id="opp-name-display">کامپیوتر: 9</div>
-            <div class="pieces-container" id="red-hand"></div>
+            <div class="hand-title red" id="p2-display">بازیکن ۲ (قرمز)</div>
         </div>
     </div>
 
@@ -225,26 +105,17 @@ HTML_TEMPLATE = """
             <line x1="20" y1="170" x2="120" y2="170" />
             <line x1="220" y1="170" x2="320" y2="170" />
         </svg>
-
-        <div class="graveyard" id="graveyard"></div>
         <div id="pieces-layer"></div>
     </div>
 
-    <button class="btn-reset" onclick="resetGame()">شروع مجدد بازی</button>
-
-    <div class="modal" id="winner-modal">
-        <div class="modal-content">
-            <div class="winner-title">🎉 پایان بازی 🎉</div>
-            <div class="winner-msg" id="winner-text"></div>
-            <button class="btn-reset" onclick="closeModalAndReset()">شروع مجدد بازی</button>
-        </div>
-    </div>
-
     <script>
+        const socket = io();
         const tg = window.Telegram?.WebApp;
         if (tg) tg.expand();
 
-        let playerName = prompt("لطفاً نام خود را برای بازی وارد کنید:", "بازیکن") || "بازیکن";
+        const urlParams = new URLSearchParams(window.location.search);
+        const roomCode = urlParams.get('room');
+        let myName = prompt("نام خود را وارد کنید:", "بازیکن") || "بازیکن";
 
         const POINTS = [
             {id: 0, x: 20, y: 20}, {id: 1, x: 170, y: 20}, {id: 2, x: 320, y: 20},
@@ -258,93 +129,43 @@ HTML_TEMPLATE = """
             {id: 22, x: 120, y: 220}, {id: 23, x: 120, y: 170}
         ];
 
-        const MILLS = [
-            [0,1,2], [2,3,4], [4,5,6], [6,7,0],
-            [8,9,10], [10,11,12], [12,13,14], [14,15,8],
-            [16,17,18], [18,19,20], [20,21,22], [22,23,16],
-            [1,9,17], [3,11,19], [5,13,21], [7,15,23]
-        ];
-
-        let state = {
-            board: Array(24).fill(null),
-            blueHand: 9,
-            redHand: 9,
-            turn: 'blue',
-            phase: 'place',
-            selectedPoint: null,
-            isRemoving: false,
-            killedBlue: 0,
-            killedRed: 0,
-            disabledMillsBlue: [], // قطارهای قبلاً ساخته‌شده که تا قطار جدید ساخته نشود قفل هستند
-            disabledMillsRed: [],
-            highlightedMill: [],
-            gameOver: false
-        };
+        let gameState = { board: Array(24).fill(null), turn: 'blue' };
+        let myColor = null;
 
         const boardEl = document.getElementById('board');
         const piecesLayer = document.getElementById('pieces-layer');
         const statusText = document.getElementById('status-text');
 
-        function initBoard() {
-            document.getElementById('player-name-display').innerText = `${playerName} (آبی)`;
-            document.getElementById('opp-name-display').innerText = `کامپیوتر (قرمز)`;
-            
-            POINTS.forEach(pt => {
-                const pDiv = document.createElement('div');
-                pDiv.className = 'point';
-                pDiv.style.left = `${pt.x}px`;
-                pDiv.style.top = `${pt.y}px`;
-                pDiv.id = `pt-${pt.id}`;
-                pDiv.onclick = () => handlePointClick(pt.id);
-                boardEl.appendChild(pDiv);
-            });
-            setStatus(`نوبت شماست (${playerName}) - مهره بگذارید`);
-            updateUI();
-        }
+        POINTS.forEach(pt => {
+            const pDiv = document.createElement('div');
+            pDiv.className = 'point';
+            pDiv.style.left = `${pt.x}px`;
+            pDiv.style.top = `${pt.y}px`;
+            pDiv.onclick = () => handlePointClick(pt.id);
+            boardEl.appendChild(pDiv);
+        });
 
-        function updateUI() {
-            const bHand = document.getElementById('blue-hand');
-            const rHand = document.getElementById('red-hand');
-            bHand.innerHTML = '';
-            rHand.innerHTML = '';
-            for(let i=0; i<state.blueHand; i++) bHand.appendChild(createPieceIcon('blue'));
-            for(let i=0; i<state.redHand; i++) rHand.appendChild(createPieceIcon('red'));
+        socket.emit('join_game', { room: roomCode, name: myName });
 
-            const graveyard = document.getElementById('graveyard');
-            graveyard.innerHTML = '';
-            for(let i=0; i<state.killedRed; i++) {
-                const p = document.createElement('div');
-                p.className = 'graveyard-piece red';
-                graveyard.appendChild(p);
-            }
-            for(let i=0; i<state.killedBlue; i++) {
-                const p = document.createElement('div');
-                p.className = 'graveyard-piece blue';
-                graveyard.appendChild(p);
-            }
+        socket.on('player_assigned', (data) => {
+            myColor = data.color;
+            statusText.innerText = `شما با رنگ ${myColor === 'blue' ? 'آبی' : 'قرمز'} وارد شدید. منتظر حریف...`;
+        });
 
-            POINTS.forEach(pt => {
-                const ptEl = document.getElementById(`pt-${pt.id}`);
-                ptEl.classList.remove('selected', 'killable', 'mill-highlight');
-                
-                if (state.selectedPoint === pt.id) {
-                    ptEl.classList.add('selected');
-                }
-                if (state.isRemoving && state.board[pt.id] === 'red') {
-                    ptEl.classList.add('killable');
-                }
-                if (state.highlightedMill.includes(pt.id)) {
-                    ptEl.classList.add('mill-highlight');
-                }
-            });
+        socket.on('update_board', (data) => {
+            gameState = data;
+            renderBoard();
+            statusText.innerText = gameState.turn === myColor ? "🔴 نوبت شماست!" : "⏳ نوبت حریف است...";
+        });
 
-            // لایه کشویی مهره‌ها (Slide Transition)
+        function renderBoard() {
             piecesLayer.innerHTML = '';
             POINTS.forEach(pt => {
-                const color = state.board[pt.id];
+                const color = gameState.board[pt.id];
                 if (color) {
                     const piece = document.createElement('div');
                     piece.className = `board-piece ${color}`;
+                    // انیمیشن کشویی روان با تغییر Positional CSS
                     piece.style.left = `${pt.x}px`;
                     piece.style.top = `${pt.y}px`;
                     piecesLayer.appendChild(piece);
@@ -352,256 +173,10 @@ HTML_TEMPLATE = """
             });
         }
 
-        function createPieceIcon(color) {
-            const d = document.createElement('div');
-            d.className = `piece-icon ${color}`;
-            return d;
-        }
-
-        function setStatus(msg) {
-            statusText.innerText = msg;
-        }
-
-        function checkWinCondition() {
-            if (state.phase !== 'move') return false;
-
-            let blueRemaining = POINTS.filter(p => state.board[p.id] === 'blue').length;
-            let redRemaining = POINTS.filter(p => state.board[p.id] === 'red').length;
-
-            if (state.killedRed >= 7 || redRemaining <= 2) {
-                triggerWin(playerName, "آبی");
-                return true;
-            } else if (state.killedBlue >= 7 || blueRemaining <= 2) {
-                triggerWin("کامپیوتر", "قرمز");
-                return true;
-            }
-            return false;
-        }
-
-        function triggerWin(winnerName, pieceColor) {
-            state.gameOver = true;
-            confetti({ particleCount: 130, spread: 90, origin: { y: 0.6 } });
-            
-            document.getElementById('winner-text').innerHTML = `
-                🏆 <b>${winnerName}</b> با مهره <b>${pieceColor}</b> برنده این نبرد شد!<br><br>
-                لطفاً اگر می‌خواهید دوباره بازی کنید، روی دکمه زیر کلیک کنید.
-            `;
-            document.getElementById('winner-modal').style.display = 'flex';
-        }
-
-        function closeModalAndReset() {
-            document.getElementById('winner-modal').style.display = 'none';
-            resetGame();
-        }
-
         function handlePointClick(id) {
-            if (state.gameOver || state.turn !== 'blue') return;
-
-            if (state.isRemoving) {
-                if (state.board[id] === 'red') {
-                    state.board[id] = null;
-                    state.killedRed++;
-                    state.isRemoving = false;
-                    state.highlightedMill = [];
-                    if (!checkWinCondition()) {
-                        switchTurn();
-                    }
-                }
-                updateUI();
-                return;
-            }
-
-            if (state.phase === 'place') {
-                if (state.board[id] === null && state.blueHand > 0) {
-                    state.board[id] = 'blue';
-                    if (checkNewMill(id, 'blue')) {
-                        state.board[id] = null;
-                        setStatus("⚠️ ساخت قطار قبل از اتمام تمام مهره‌ها مجاز نیست!");
-                        return;
-                    }
-                    state.blueHand--;
-                    checkPhase();
-                    switchTurn();
-                }
-            } else {
-                if (state.selectedPoint === null) {
-                    if (state.board[id] === 'blue') {
-                        state.selectedPoint = id;
-                    }
-                } else {
-                    if (state.board[id] === null) {
-                        const fromPt = state.selectedPoint;
-                        
-                        // انجام جابه‌جایی موقت
-                        state.board[id] = 'blue';
-                        state.board[fromPt] = null;
-                        
-                        let formedMill = checkNewMill(id, 'blue');
-                        
-                        if (formedMill) {
-                            let millKey = formedMill.slice().sort().join('-');
-                            // بررسی قانون قفل ساخت قطار تکراری
-                            if (state.disabledMillsBlue.includes(millKey)) {
-                                // بازگرداندن حرکت
-                                state.board[fromPt] = 'blue';
-                                state.board[id] = null;
-                                state.selectedPoint = null;
-                                setStatus("🚫 ساخت مجدد این قطار مجاز نیست! ترکیب جدید بسازید.");
-                                updateUI();
-                                return;
-                            }
-
-                            // قطار مجاز است؛ ثبت قفل قطارهای قبلی
-                            state.disabledMillsBlue.push(millKey);
-                            state.isRemoving = true;
-                            state.highlightedMill = formedMill;
-                            state.selectedPoint = null;
-                            setStatus("🔥 قطار جدید ساخته شد! یکی از مهره‌های قرمز را بسوزانید.");
-                        } else {
-                            state.selectedPoint = null;
-                            if (!checkWinCondition()) {
-                                switchTurn();
-                            }
-                        }
-                    } else if (state.board[id] === 'blue') {
-                        state.selectedPoint = id;
-                    }
-                }
-            }
-            updateUI();
+            if (gameState.turn !== myColor) return;
+            socket.emit('make_move', { room: roomCode, point: id, color: myColor });
         }
-
-        function checkNewMill(ptId, color) {
-            for (let mill of MILLS) {
-                if (mill.includes(ptId) && mill.every(p => state.board[p] === color)) {
-                    return mill;
-                }
-            }
-            return null;
-        }
-
-        function checkPhase() {
-            if (state.blueHand === 0 && state.redHand === 0) {
-                state.phase = 'move';
-            }
-        }
-
-        function switchTurn() {
-            if (state.gameOver) return;
-            state.turn = state.turn === 'blue' ? 'red' : 'blue';
-            if (!state.isRemoving) {
-                setStatus(state.turn === 'blue' ? (state.phase === 'place' ? `نوبت ${playerName}: نقطه خالی را لمس کنید` : `نوبت ${playerName}: مهره را جابه‌جا کنید`) : "تفکر هوش مصنوعی قوی...");
-            }
-            updateUI();
-            if (state.turn === 'red') {
-                setTimeout(aiMove, 700);
-            }
-        }
-
-        function aiMove() {
-            if (state.gameOver) return;
-
-            if (state.phase === 'place' && state.redHand > 0) {
-                let emptyPoints = POINTS.map(p => p.id).filter(id => state.board[id] === null);
-                let targetPt = null;
-
-                for (let mill of MILLS) {
-                    let blueInMill = mill.filter(p => state.board[p] === 'blue').length;
-                    let emptyInMill = mill.filter(p => state.board[p] === null);
-                    if (blueInMill === 2 && emptyInMill.length === 1) {
-                        targetPt = emptyInMill[0];
-                        break;
-                    }
-                }
-
-                if (targetPt === null) {
-                    targetPt = emptyPoints[Math.floor(Math.random() * emptyPoints.length)];
-                }
-
-                state.board[targetPt] = 'red';
-                state.redHand--;
-            } else {
-                let redPieces = POINTS.map(p => p.id).filter(id => state.board[id] === 'red');
-                let emptyPoints = POINTS.map(p => p.id).filter(id => state.board[id] === null);
-                
-                if (redPieces.length > 0 && emptyPoints.length > 0) {
-                    let moved = false;
-                    for (let f of redPieces) {
-                        for (let t of emptyPoints) {
-                            state.board[f] = null;
-                            state.board[t] = 'red';
-                            let formedMill = checkNewMill(t, 'red');
-                            let millKey = formedMill ? formedMill.slice().sort().join('-') : null;
-
-                            if (formedMill && !state.disabledMillsRed.includes(millKey)) {
-                                moved = true;
-                                state.disabledMillsRed.push(millKey);
-                                state.highlightedMill = formedMill;
-                                setStatus("🤖 کامپیوتر قطار ساخت!");
-                                updateUI();
-
-                                setTimeout(() => {
-                                    let bluePiecesOnBoard = POINTS.map(p => p.id).filter(id => state.board[id] === 'blue');
-                                    if (bluePiecesOnBoard.length > 0) {
-                                        let killTarget = bluePiecesOnBoard[Math.floor(Math.random() * bluePiecesOnBoard.length)];
-                                        state.board[killTarget] = null;
-                                        state.killedBlue++;
-                                        setStatus(`🤖 کامپیوتر مهره شما را سوزاند!`);
-                                    }
-                                    state.highlightedMill = [];
-                                    checkPhase();
-                                    if (!checkWinCondition()) {
-                                        state.turn = 'blue';
-                                        setStatus(state.phase === 'place' ? `نوبت ${playerName}: نقطه خالی را لمس کنید` : `نوبت ${playerName}: مهره را جابه‌جا کنید`);
-                                    }
-                                    updateUI();
-                                }, 1200);
-                                return;
-                            }
-                            state.board[f] = 'red';
-                            state.board[t] = null;
-                        }
-                        if (moved) break;
-                    }
-
-                    if (!moved) {
-                        let from = redPieces[Math.floor(Math.random() * redPieces.length)];
-                        let to = emptyPoints[Math.floor(Math.random() * emptyPoints.length)];
-                        state.board[from] = null;
-                        state.board[to] = 'red';
-                    }
-                }
-            }
-
-            checkPhase();
-            if (!checkWinCondition()) {
-                state.turn = 'blue';
-                setStatus(state.phase === 'place' ? `نوبت ${playerName}: نقطه خالی را لمس کنید` : `نوبت ${playerName}: مهره را جابه‌جا کنید`);
-            }
-            updateUI();
-        }
-
-        function resetGame() {
-            state = {
-                board: Array(24).fill(null),
-                blueHand: 9,
-                redHand: 9,
-                turn: 'blue',
-                phase: 'place',
-                selectedPoint: null,
-                isRemoving: false,
-                killedBlue: 0,
-                killedRed: 0,
-                disabledMillsBlue: [],
-                disabledMillsRed: [],
-                highlightedMill: [],
-                gameOver: false
-            };
-            setStatus(`نوبت شماست (${playerName}) - مهره بگذارید`);
-            updateUI();
-        }
-
-        initBoard();
     </script>
 </body>
 </html>
@@ -611,35 +186,61 @@ HTML_TEMPLATE = """
 def index():
     return render_template_string(HTML_TEMPLATE)
 
+# مدیریت WebSocket برای هم‌گام‌سازی دو بازیکن آنلاین
+@socketio.on('join_game')
+def handle_join(data):
+    room = data['room']
+    name = data['name']
+    join_room(room)
+
+    if room not in active_rooms:
+        active_rooms[room] = {
+            'players': {},
+            'board': [None] * 24,
+            'turn': 'blue'
+        }
+
+    room_data = active_rooms[room]
+    if len(room_data['players']) == 0:
+        room_data['players'][request.sid] = {'color': 'blue', 'name': name}
+        emit('player_assigned', {'color': 'blue'})
+    elif len(room_data['players']) == 1:
+        room_data['players'][request.sid] = {'color': 'red', 'name': name}
+        emit('player_assigned', {'color': 'red'})
+        emit('update_board', room_data, to=room)
+
+@socketio.on('make_move')
+def handle_move(data):
+    room = data['room']
+    pt = data['point']
+    color = data['color']
+
+    room_data = active_rooms.get(room)
+    if room_data and room_data['turn'] == color:
+        room_data['board'][pt] = color
+        room_data['turn'] = 'red' if color == 'blue' else 'blue'
+        emit('update_board', room_data, to=room)
+
 # ==========================================
-# 2. TELEGRAM BOT (Fix Room System)
+# 2. TELEGRAM BOT HANDLER
 # ==========================================
 TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-WEBAPP_URL = os.getenv("WEBAPP_URL", "https://game-nawid.onrender.com")
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://your-domain.onrender.com")
 
-serekak_games = {}
-rooms = {}
 user_states = {}
-
-WIN_COMBOS = [(0,1,2), (3,4,5), (6,7,8), (0,3,6), (1,4,7), (2,5,8), (0,4,8), (2,4,6)]
+user_rooms = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    app_url = WEBAPP_URL.strip()
-    
-    keyboard = [
-        [InlineKeyboardButton("⚔️ نبرد سه‌رگک (با کامپیوتر)", callback_data="play_serekak_ai")],
-        [InlineKeyboardButton("👑 نبرد نه‌رگک (با کامپیوتر)", web_app=WebAppInfo(url=app_url))],
-        [InlineKeyboardButton("👥 ساخت / ورود به اتاق بازی با دوستان", callback_data="friend_room_menu")],
-        [InlineKeyboardButton("⚙️ تنظیمات", callback_data="settings"), InlineKeyboardButton("📖 راهنمای بازی", callback_data="guide")],
-        [InlineKeyboardButton("ℹ️ درباره ربات", callback_data="about")]
+    kb = [
+        [InlineKeyboardButton("⚔️ بازی با کامپیوتر (آفلاین)", callback_data="ai_menu")],
+        [InlineKeyboardButton("👥 ساخت / ورود به اتاق دو نفره (آنلاین)", callback_data="friend_room_menu")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    msg = "سلام رفیق! 👑 به مرکز بازی‌های استراتژیک خوش آمدی.\nلطفاً یکی از گزینه‌های زیر را انتخاب کن:"
+    msg = "👑 **به ربات تخته استراتژیک خوش آمدید!**\nلطفاً حالت بازی را انتخاب کنید:"
     
     if update.message:
-        await update.message.reply_text(msg, reply_markup=reply_markup)
+        await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
     elif update.callback_query:
-        await update.callback_query.message.reply_text(msg, reply_markup=reply_markup)
+        await update.callback_query.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -649,66 +250,58 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "friend_room_menu":
         kb = [
-            [InlineKeyboardButton("➕ ساخت اتاق جدید", callback_data="create_room")],
-            [InlineKeyboardButton("🔑 ورود با کد اتاق", callback_data="join_room")],
-            [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_main")]
+            [InlineKeyboardButton("➕ ساخت اتاق جدید", callback_data="select_game_type")],
+            [InlineKeyboardButton("🔑 ورود با کد اتاق", callback_data="join_room")]
         ]
-        await query.message.reply_text("👥 **بخش بازی با دوستان (دو نفره):**\nاتاق بسازید و کد آن را برای دوست خود بفرستید!", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+        await query.message.reply_text("👥 **بخش بازی با دوستان (آنلاین زنده):**", reply_markup=InlineKeyboardMarkup(kb))
 
-    elif data == "create_room":
+    elif data == "select_game_type":
+        kb = [
+            [InlineKeyboardButton("👑 بازی نه‌رگک آنلاین", callback_data="create_9regak")],
+            [InlineKeyboardButton("⚔️ بازی سه‌رگک آنلاین", callback_data="create_3regak")]
+        ]
+        await query.message.reply_text("🎮 نوع بازی را برای ساخت اتاق انتخاب کنید:", reply_markup=InlineKeyboardMarkup(kb))
+
+    elif data in ["create_9regak", "create_3regak"]:
         room_code = str(random.randint(1000, 9999))
-        rooms[room_code] = {'host': user_id, 'guest': None}
+        user_rooms[room_code] = {'host': user_id, 'type': data}
+        
+        url = f"{WEBAPP_URL}?room={room_code}"
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🎮 ورود به تخته شما (میزبان)", web_app=WebAppInfo(url=url))]])
+        
         await query.message.reply_text(
-            f"🔑 **اتاق شما ساخته شد!**\nکد اتاق: `{room_code}`\n\nاین کد را به دوستت بده تا وارد کند.",
+            f"🔑 **اتاق با موفقیت ساخته شد!**\nکد اتاق: `{room_code}`\n\nاین کد را به دوستتان بدهید تا وارد کند.",
+            reply_markup=kb,
             parse_mode='Markdown'
         )
 
     elif data == "join_room":
         user_states[user_id] = 'awaiting_room_code'
-        await query.message.reply_text("لطفاً کد ۴ رقمی اتاق دوستت رو بفرست:")
-
-    elif data == "play_serekak_ai":
-        serekak_games[user_id] = {'board': [''] * 9, 'x_count': 0, 'o_count': 0, 'phase': 'place', 'selected': None}
-        await query.message.reply_text("⚔️ **بازی سه‌رگک با کامپیوتر شروع شد!**", parse_mode='Markdown')
-
-    elif data == "guide":
-        await query.message.reply_text("📖 **راهنمای بازی‌ها:**\nدر فاز جابه‌جایی با هر قطار جدید، یک مهره حریف را بسوزانید.")
-
-    elif data == "settings":
-        await query.message.reply_text("⚙️ **تنظیمات:** درجه سختی هوش مصنوعی روی **حالت سخت** تنظیم شده است.")
-
-    elif data == "about":
-        await query.message.reply_text("🤖 **درباره ربات:**\nطراحی شده توسط @cactuc580")
-
-    elif data == "back_main":
-        await start(update, context)
+        await query.message.reply_text("لطفاً کد ۴ رقمی اتاق دوستتان را ارسال کنید:")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     text = update.message.text.strip()
-    app_url = WEBAPP_URL.strip()
 
     if user_states.get(user_id) == 'awaiting_room_code':
-        if text in rooms:
-            rooms[text]['guest'] = user_id
+        if text in user_rooms:
             user_states.pop(user_id, None)
+            url = f"{WEBAPP_URL}?room={text}"
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton("🎮 ورود به تخته دو نفره آنلاین", web_app=WebAppInfo(url=url))]])
             
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🎮 ورود به تخته آنلاین (دو نفره)", web_app=WebAppInfo(url=app_url))]
-            ])
-            
+            # پیام هم برای دوست و هم راهنمایی شروع بازی
             await update.message.reply_text(
-                f"✅ **با موفقیت وارد اتاق {text} شدید!**\nروی دکمه زیر کلیک کنید تا بازی دو نفره آنلاین باز شود:",
+                f"✅ **با موفقیت وارد اتاق {text} شدید!**\nروی دکمه زیر کلیک کنید تا وارد بازی زنده با دوست خود شوید:",
                 reply_markup=kb,
                 parse_mode='Markdown'
             )
         else:
-            await update.message.reply_text("❌ کد اتاق اشتباه است. دوباره وارد کنید:")
+            await update.message.reply_text("❌ کد اتاق یافت نشد یا منقضی شده است. دوباره کد را بفرستید:")
 
 if __name__ == '__main__':
     import threading
     port = int(os.environ.get("PORT", 10000))
-    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=port, debug=False)).start()
+    threading.Thread(target=lambda: socketio.run(app, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)).start()
 
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
