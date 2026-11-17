@@ -223,7 +223,7 @@ async def send_group_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     url = f"https://t.me/{ctx.bot.username}/{short}?startapp=group"
     await update.effective_message.reply_text(
-        "🎡 گردونه آماده است. فقط ادمین می‌تواند بچرخاند؛ نتیجه اینجا اعلام می‌شود.",
+        "🎡 گردونه آماده است. فقط ادمین اصلی می‌چرخاند؛ همه اعضا می‌توانند زنده ببینند.",
         reply_markup=InlineKeyboardMarkup([[Btn("🎡 باز کردن گردونه", url=url)]]),
     )
 
