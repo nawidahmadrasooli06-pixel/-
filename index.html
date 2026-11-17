@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<title>CACTUC SPINNER</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+<div id="blocked" class="blocked hidden">
+  <div>🔒</div>
+  <p>این برنامه فقط از داخل تلگرام و توسط ادمین قابل استفاده است.</p>
+</div>
+
+<header class="top">
+  <div class="brand"><span class="logo">🌵</span><span class="brand-text">CACTUC SPINNER</span></div>
+</header>
+
+<main>
+  <section id="view-wheel" class="view active">
+    <div class="wheel-wrap"><canvas id="wheel"></canvas></div>
+    <div id="hint" class="hint hidden"></div>
+    <button id="spinBtn" class="spin-btn">🎡 چرخاندن اسپینر</button>
+    <div class="chips">
+      <span class="chip" id="chipCount">۰ نفر</span>
+      <span class="chip" id="chipAuto">حذف خودکار: خاموش</span>
+    </div>
+  </section>
+
+  <section id="view-names" class="view">
+    <div class="card">
+      <h2>➕ افزودن اسم</h2>
+      <p class="muted">هر اسم را در یک خط بنویس یا با ویرگول جدا کن.</p>
+      <textarea id="addText" rows="4" placeholder="مثلاً:&#10;علی&#10;سارا، محمد"></textarea>
+      <button id="addBtn" class="btn primary">افزودن به لیست</button>
+    </div>
+    <div class="card">
+      <div class="row-between">
+        <h2>📋 شرکت‌کنندگان</h2>
+        <span class="chip" id="namesCount">۰</span>
+      </div>
+      <ul id="nameList" class="list"></ul>
+      <button id="clearBtn" class="btn danger">🔄 پاک کردن کل لیست</button>
+    </div>
+  </section>
+
+  <section id="view-winners" class="view">
+    <div class="card">
+      <h2>🏆 برندگان قبلی</h2>
+      <ul id="winnerList" class="list"></ul>
+      <button id="winClearBtn" class="btn danger">🗑 پاک کردن تاریخچه</button>
+    </div>
+  </section>
+
+  <section id="view-settings" class="view">
+    <div class="card">
+      <h2>⚙️ تنظیمات</h2>
+      <label class="switch-row">
+        <span>
+          <b>حذف خودکار برنده از لیست</b>
+          <small class="muted">بعد از هر چرخش، اسم برنده از لیست حذف می‌شود.</small>
+        </span>
+        <span class="switch"><input type="checkbox" id="autoRemove"><i></i></span>
+      </label>
+    </div>
+  </section>
+</main>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="wheel"><span>🎡</span>گردونه</button>
+  <button class="tab" data-tab="names"><span>👥</span>اسامی</button>
+  <button class="tab" data-tab="winners"><span>🏆</span>برندگان</button>
+  <button class="tab" data-tab="settings"><span>⚙️</span>تنظیمات</button>
+</nav>
+
+<div id="winOverlay" class="overlay hidden">
+  <div class="win-card">
+    <div class="win-emoji">🏆</div>
+    <div class="win-label">🎉 برنده این دور</div>
+    <div id="winName" class="win-name"></div>
+    <div id="winNote" class="muted"></div>
+    <div class="win-actions">
+      <button id="winAgain" class="btn primary">🎡 چرخاندن مجدد</button>
+      <button id="winClose" class="btn ghost">بستن</button>
+    </div>
+  </div>
+</div>
+<canvas id="confetti"></canvas>
+<div id="toast" class="toast"></div>
+<script src="/app.js"></script>
+</body>
+</html>
