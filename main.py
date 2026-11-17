@@ -44,7 +44,7 @@ async def main() -> None:
     application.bot_data["backup"] = backup
     await setup_bot(application)
 
-    runner = web.AppRunner(create_web_app(db, backup))
+    runner = web.AppRunner(create_web_app(db, backup, application.bot))
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", config.PORT).start()
     log.info("Web server listening on port %s", config.PORT)
