@@ -12,7 +12,7 @@ const faNum = (n) => Number(n).toLocaleString('fa-IR');
 
 const state = {
   names: [], winners: [], settings: { auto_remove: false }, limits: { max_names: 100, max_len: 30 },
-  spinning: false, rotation: 0, drawSegs: null, editingId: null,
+  spinning: false, rotation: 0, drawSegs: null, editingId: null, owner: false, version: 0, spinSeq: 0,
 };
 
 /* ---------- helpers ---------- */
@@ -33,16 +33,17 @@ function confirmBox(msg, cb) {
   else if (window.confirm(msg)) cb();
 }
 async function api(path, body) {
-  let data;
+  let data, status = 0;
   try {
     const res = await fetch('/api/' + path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Init-Data': tg ? tg.initData : '' },
       body: JSON.stringify(body || {}),
     });
+    status = res.status;
     data = await res.json();
   } catch (e) { throw new Error('ارتباط با سرور برقرار نشد.'); }
-  if (!data.ok) throw new Error(data.error || 'خطا');
+  if (!data.ok) { const err = new Error(data.error || 'خطا'); err.status = status; throw err; }
   return data;
 }
 function el(tag, cls, text) {
@@ -52,10 +53,22 @@ function el(tag, cls, text) {
 /* ---------- state ---------- */
 function applyState(d) {
   state.names = d.names; state.winners = d.winners; state.settings = d.settings; state.limits = d.limits;
+  if (d.role) { state.owner = d.role === 'owner'; applyRole(); }
+  if (d.version != null) state.version = d.version;
+  if (d.spin_seq != null) state.spinSeq = d.spin_seq;
   if (state.editingId && !state.names.some((n) => n.id === state.editingId)) state.editingId = null;
   renderAll();
 }
-async function refresh() { applyState(await api('state')); }
+async function refresh() {
+  const d = await api('state'); applyState(d);
+  if (d.rotation != null && !state.spinning) { state.rotation = d.rotation; drawWheel(state.rotation); }
+}
+function applyRole() {
+  const o = state.owner;
+  ['#spinBtn', '#addCard', '#clearBtn', '#winClearBtn', '#winAgain', '#chipAuto'].forEach((s) => $(s).classList.toggle('hidden', !o));
+  $('#chipRole').classList.toggle('hidden', o);
+  document.querySelector('[data-tab="settings"]').classList.toggle('hidden', !o);
+}
 
 /* ---------- tabs ---------- */
 document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
@@ -77,7 +90,10 @@ function renderWheelInfo() {
   $('#chipCount').textContent = faNum(n) + ' نفر';
   $('#chipAuto').textContent = 'حذف خودکار: ' + (state.settings.auto_remove ? 'روشن' : 'خاموش');
   const hint = $('#hint');
-  if (n < 2) {
+  if (!state.owner) {
+    hint.classList.remove('hidden');
+    hint.textContent = n < 2 ? 'ادمین هنوز اسم‌ها را کامل نکرده است.' : '👀 منتظر چرخش ادمین باش؛ نتیجه زنده نمایش داده می‌شود.';
+  } else if (n < 2) {
     hint.classList.remove('hidden');
     hint.textContent = n === 0 ? 'برای شروع، از تب «اسامی» اسم اضافه کن.' : 'حداقل دو اسم لازم است.';
   } else hint.classList.add('hidden');
@@ -90,6 +106,7 @@ function renderNames() {
   state.names.forEach((n, i) => {
     const li = el('li');
     li.appendChild(el('span', 'idx', faNum(i + 1)));
+    if (!state.owner) { li.appendChild(el('span', 'nm', n.name)); ul.appendChild(li); return; }
     if (state.editingId === n.id) {
       const inp = el('input'); inp.type = 'text'; inp.value = n.name; inp.maxLength = state.limits.max_len;
       const ok = el('button', 'icon-btn', '✔️'); const no = el('button', 'icon-btn', '✖️');
@@ -225,47 +242,67 @@ function drawWheel(rot) {
   ctx.fillStyle = pg; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#4c1d95'; ctx.stroke(); ctx.restore();
 }
 
-/* ---------- spin ---------- */
+/* ---------- spin (shared: the server plans it, everyone plays the same plan) ---------- */
+let clockOffset = 0, lastSeq = 0;
+const serverNow = () => Date.now() + clockOffset;
+const setClock = (t) => { if (t) clockOffset = t - Date.now(); };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 $('#spinBtn').addEventListener('click', spin);
 $('#winAgain').addEventListener('click', () => { closeWin(); spin(); });
 $('#winClose').addEventListener('click', closeWin);
 function closeWin() { $('#winOverlay').classList.add('hidden'); stopConfetti(); }
 
 async function spin() {
-  if (state.spinning) return;
+  if (!state.owner || state.spinning) return;
   if (state.names.length < 2) return toast('حداقل دو اسم لازم است');
   state.spinning = true; $('#spinBtn').disabled = true; haptic('impact', 'heavy');
   let r;
   try { r = await api('spin'); }
   catch (e) { state.spinning = false; renderWheelInfo(); return toast(e.message); }
+  setClock(r.server_time); lastSeq = r.event.seq;
+  await playSpin(r.event);
+  applyState(r);
+  showWin(r.winner.name, r.removed);
+}
 
-  const segs = r.segments; state.drawSegs = segs;
-  const idx = segs.findIndex((s) => s.id === r.winner.id);
-  const n = segs.length, seg = TAU / n;
-  const jitter = (Math.random() - 0.5) * seg * 0.6;     // visual only, stays inside the winning slice
-  const target = mod(-(idx + 0.5) * seg + jitter, TAU);
-  const delta = mod(target - mod(state.rotation, TAU), TAU) + TAU * (6 + Math.floor(Math.random() * 3));
-  const r0 = state.rotation, dur = 6500, t0 = performance.now();
-  let lastTick = Math.floor(r0 / seg), lastHaptic = 0;
-
+async function playSpin(ev) {
+  state.spinning = true; state.drawSegs = ev.segments; $('#spinBtn').disabled = true;
+  closeWin(); switchTab('wheel');
+  const seg = TAU / ev.segments.length;
+  let lastTick = Math.floor(ev.r0 / seg), lastHaptic = 0;
   await new Promise((resolve) => {
-    const frame = (now) => {
-      const t = Math.min(1, (now - t0) / dur);
+    const frame = () => {
+      const t = Math.min(1, Math.max(0, (serverNow() - ev.started_at) / ev.duration));
       const e = 1 - Math.pow(1 - t, 4);                  // fast start, slow stop
-      const rot = r0 + delta * e;
+      const rot = ev.r0 + ev.delta * e;
       drawWheel(rot);
-      const tick = Math.floor(rot / seg);
+      const tick = Math.floor(rot / seg), now = performance.now();
       if (tick !== lastTick && now - lastHaptic > 45) { haptic('impact', t > 0.8 ? 'medium' : 'light'); lastHaptic = now; }
       lastTick = tick;
       if (t < 1) requestAnimationFrame(frame); else resolve();
     };
     requestAnimationFrame(frame);
   });
-
-  state.rotation = mod(r0 + delta, TAU);
+  state.rotation = mod(ev.r0 + ev.delta, TAU);
   state.drawSegs = null; state.spinning = false;
-  applyState(r);
-  showWin(r.winner.name, r.removed);
+}
+
+// viewers: ask the server once a second whether something happened
+async function pollLoop() {
+  for (;;) {
+    await sleep(1000);
+    if (state.spinning || state.owner) continue;
+    try {
+      const d = await api('live'); setClock(d.server_time);
+      if (d.event && d.spin_seq > lastSeq) {
+        const ev = d.event; lastSeq = d.spin_seq;
+        if (serverNow() - ev.started_at < ev.duration + 1500) {
+          await playSpin(ev); await refresh(); showWin(ev.winner.name, ev.removed);
+        } else await refresh();
+      } else if (d.version !== state.version) await refresh();
+    } catch (e) { /* temporary network problem: try again next second */ }
+  }
 }
 
 /* ---------- win overlay + confetti ---------- */
@@ -307,8 +344,8 @@ window.addEventListener('resize', () => { setupCanvas(); drawWheel(state.rotatio
   if (document.fonts && document.fonts.load) {
     document.fonts.load('700 16px Vazirmatn').then(() => { if (!state.spinning) drawWheel(state.rotation); }).catch(() => {});
   }
-  try { await refresh(); } catch (e) {
-    if (/دسترسی|نامعتبر/.test(e.message)) { $('#blocked').classList.remove('hidden'); $('#blocked p').textContent = e.message; }
+  try { await refresh(); lastSeq = state.spinSeq || 0; pollLoop(); } catch (e) {
+    if (e.status === 401 || e.status === 403) { $('#blocked').classList.remove('hidden'); $('#blocked p').textContent = e.message; }
     else toast(e.message);
   }
 })();
