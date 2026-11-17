@@ -188,9 +188,8 @@ function drawWheel(rot) {
     const seg = TAU / n;
     for (let i = 0; i < n; i++) {
       const a0 = -Math.PI / 2 + rot + i * seg;
-      let c = i % COLORS.length; if (i === n - 1 && n > 1 && c === 0) c = 5;
       ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a0, a0 + seg); ctx.closePath();
-      ctx.fillStyle = COLORS[c]; ctx.fill();
+      ctx.fillStyle = 'hsl(' + Math.round((230 + i * 360 / n) % 360) + ',68%,52%)'; ctx.fill();
       ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1; ctx.stroke();
     }
     const sh = ctx.createRadialGradient(cx, cy, R * 0.1, cx, cy, R);
