@@ -27,6 +27,7 @@ from utils import clean_name, fa, format_time, parse_names
 log = logging.getLogger("bot")
 HTML = ParseMode.HTML
 PAGE = 8
+OWNER_USERNAME = "@cactuc580"
 
 
 def esc(text: str) -> str:
@@ -54,8 +55,9 @@ def admin_only(func):
                 await update.callback_query.answer("⛔ دسترسی ندارید", show_alert=True)
             elif update.effective_message:
                 await update.effective_message.reply_text(
-                    "⛔ این ربات اختصاصی است و فقط ادمین می‌تواند از آن استفاده کند.\n"
-                    f"شناسه عددی شما: <code>{user.id if user else '?'}</code>",
+                    "⛔ این ربات اختصاصی است و فقط مالک این ربات می‌تواند از آن استفاده کند.\n\n"
+                    f"👤 مالک ربات: {OWNER_USERNAME}\n"
+                    f"🆔 شناسه عددی شما: <code>{user.id if user else '?'}</code>",
                     parse_mode=HTML,
                 )
             return
