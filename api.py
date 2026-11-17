@@ -2,7 +2,9 @@ import asyncio
 import html
 import json
 import logging
+import math
 import secrets
+import time
 from pathlib import Path
 
 from aiohttp import web
@@ -67,9 +69,41 @@ async def auth_mw(request, handler):
         user = validate_init_data(request.headers.get("X-Init-Data", ""), config.BOT_TOKEN)
         if not user:
             return fail("نشست نامعتبر است. اپ را از داخل تلگرام باز کنید.", 401)
-        if user["id"] not in config.ADMIN_IDS:
-            return fail("⛔ شما دسترسی مدیریت ندارید.", 403)
+        owner = user["id"] in config.ADMIN_IDS
+        request["owner"] = owner
+        if not owner:
+            if request.path not in READ_PATHS:
+                return fail("⛔ فقط ادمین اصلی می‌تواند این کار را انجام دهد.", 403)
+            if not await is_member(request.app, user["id"]):
+                return fail("⛔ فقط اعضای گروه می‌توانند گردونه را ببینند.", 403)
     return await handler(request)
+
+
+READ_PATHS = {"/api/state", "/api/live"}  # what group members (viewers) may call
+TAU = 2 * math.pi
+
+
+def bump(app) -> None:
+    app["version"] += 1
+
+
+async def is_member(app, user_id: int) -> bool:
+    group, bot = app["db"].get_setting("group_chat_id"), app["bot"]
+    if not group or not bot:
+        return False
+    now = time.time()
+    hit = app["member_cache"].get(user_id)
+    if hit and now - hit[0] < 120:
+        return hit[1]
+    try:
+        m = await bot.get_chat_member(int(group), user_id)
+        ok = m.status in ("creator", "administrator", "member") or (
+            m.status == "restricted" and getattr(m, "is_member", False)
+        )
+    except Exception:  # noqa: BLE001
+        ok = False
+    app["member_cache"][user_id] = (now, ok)
+    return ok
 
 
 # ---------- pages ----------
@@ -91,7 +125,29 @@ async def health(request):
 
 # ---------- API ----------
 async def api_state(request):
-    return _json(full_state(request.app["db"]))
+    app = request.app
+    return _json(
+        full_state(
+            app["db"],
+            rotation=app["rotation"],
+            version=app["version"],
+            spin_seq=app["spin_seq"],
+            role="owner" if request.get("owner") else "viewer",
+        )
+    )
+
+
+async def api_live(request):
+    app = request.app
+    return _json(
+        {
+            "ok": True,
+            "version": app["version"],
+            "spin_seq": app["spin_seq"],
+            "event": app["live_event"],
+            "server_time": int(time.time() * 1000),
+        }
+    )
 
 
 async def api_add(request):
@@ -102,6 +158,7 @@ async def api_add(request):
         return fail("اسمی پیدا نشد.")
     added, skipped = db.add_names(names)
     backup.schedule()
+    bump(request.app)
     return _json(full_state(db, added=added, skipped=skipped))
 
 
@@ -112,6 +169,7 @@ async def api_remove(request):
     if name_id is None or not db.remove_name(name_id):
         return fail("این اسم پیدا نشد.", 404)
     backup.schedule()
+    bump(request.app)
     return _json(full_state(db))
 
 
@@ -125,6 +183,7 @@ async def api_edit(request):
     if not db.rename(name_id, new_name):
         return fail("این اسم پیدا نشد.", 404)
     backup.schedule()
+    bump(request.app)
     return _json(full_state(db))
 
 
@@ -132,6 +191,7 @@ async def api_clear(request):
     db, backup = request.app["db"], request.app["backup"]
     db.clear_names()
     backup.schedule()
+    bump(request.app)
     return _json(full_state(db))
 
 
@@ -139,6 +199,7 @@ async def api_winners_clear(request):
     db, backup = request.app["db"], request.app["backup"]
     db.clear_winners()
     backup.schedule()
+    bump(request.app)
     return _json(full_state(db))
 
 
@@ -148,6 +209,7 @@ async def api_settings(request):
     if "auto_remove" in body:
         db.set_auto_remove(bool(body["auto_remove"]))
         backup.schedule()
+        bump(request.app)
     return _json(full_state(db))
 
 
@@ -174,14 +236,30 @@ async def api_spin(request):
         removed = False
         if db.auto_remove():
             removed = db.remove_name(winner["id"])
+        app = request.app
+        idx = next(i for i, x in enumerate(names) if x["id"] == winner["id"])
+        seg = TAU / len(names)
+        jitter = (secrets.randbelow(1000) / 1000 - 0.5) * seg * 0.6  # visual only, stays inside the slice
+        r0 = app["rotation"]
+        target = (-(idx + 0.5) * seg + jitter) % TAU
+        delta = ((target - (r0 % TAU)) % TAU) + TAU * (6 + secrets.randbelow(3))
+        app["rotation"] = (r0 + delta) % TAU
+        app["spin_seq"] += 1
+        event = {
+            "seq": app["spin_seq"], "winner": winner, "segments": names, "removed": removed,
+            "r0": r0, "delta": delta, "duration": 6500, "started_at": int(time.time() * 1000),
+        }
+        app["live_event"] = event
         backup.schedule()
+        bump(request.app)
         group = db.get_setting("group_chat_id")
         bot = request.app["bot"]
         if group and bot:
             task = asyncio.create_task(_announce(bot, int(group), winner["name"]))
             request.app["tasks"].add(task)
             task.add_done_callback(request.app["tasks"].discard)
-        return _json(full_state(db, winner=winner, segments=names, removed=removed))
+        return _json(full_state(db, winner=winner, segments=names, removed=removed, event=event,
+                                server_time=event["started_at"]))
 
 
 def create_web_app(db, backup, bot=None) -> web.Application:
@@ -190,6 +268,11 @@ def create_web_app(db, backup, bot=None) -> web.Application:
     app["backup"] = backup
     app["bot"] = bot
     app["tasks"] = set()
+    app["version"] = 0
+    app["spin_seq"] = 0
+    app["live_event"] = None
+    app["rotation"] = 0.0
+    app["member_cache"] = {}
     app["spin_lock"] = asyncio.Lock()
     app.add_routes(
         [
@@ -198,6 +281,7 @@ def create_web_app(db, backup, bot=None) -> web.Application:
             web.get("/app.js", script),
             web.get("/health", health),
             web.post("/api/state", api_state),
+            web.post("/api/live", api_live),
             web.post("/api/add", api_add),
             web.post("/api/remove", api_remove),
             web.post("/api/edit", api_edit),
