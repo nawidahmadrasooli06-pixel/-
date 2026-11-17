@@ -1,4 +1,5 @@
 import asyncio
+import html
 import json
 import logging
 import secrets
@@ -150,6 +151,18 @@ async def api_settings(request):
     return _json(full_state(db))
 
 
+async def _announce(bot, chat_id: int, name: str):
+    await asyncio.sleep(7.5)  # wait until the wheel animation ends on the admin's phone
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=f"🎡 <b>CACTUC SPINNER</b>\n━━━━━━━━━━━━━━\n🏆 برنده: <b>{html.escape(name, quote=False)}</b> 🎉",
+            parse_mode="HTML",
+        )
+    except Exception:  # noqa: BLE001
+        log.exception("Could not announce winner in group")
+
+
 async def api_spin(request):
     db, backup = request.app["db"], request.app["backup"]
     async with request.app["spin_lock"]:
@@ -162,13 +175,21 @@ async def api_spin(request):
         if db.auto_remove():
             removed = db.remove_name(winner["id"])
         backup.schedule()
+        group = db.get_setting("group_chat_id")
+        bot = request.app["bot"]
+        if group and bot:
+            task = asyncio.create_task(_announce(bot, int(group), winner["name"]))
+            request.app["tasks"].add(task)
+            task.add_done_callback(request.app["tasks"].discard)
         return _json(full_state(db, winner=winner, segments=names, removed=removed))
 
 
-def create_web_app(db, backup) -> web.Application:
+def create_web_app(db, backup, bot=None) -> web.Application:
     app = web.Application(middlewares=[error_mw, auth_mw])
     app["db"] = db
     app["backup"] = backup
+    app["bot"] = bot
+    app["tasks"] = set()
     app["spin_lock"] = asyncio.Lock()
     app.add_routes(
         [
