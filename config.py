@@ -24,6 +24,8 @@ TIMEZONE = os.getenv("TIMEZONE", "Europe/Berlin")
 KEEP_ALIVE = os.getenv("KEEP_ALIVE", "1") == "1"
 BACKUP_ENABLED = os.getenv("BACKUP_ENABLED", "1") == "1"
 
+APP_SHORT_NAME = os.getenv("APP_SHORT_NAME", "").strip()
+
 MAX_NAMES = 100
 MAX_NAME_LEN = 30
 
