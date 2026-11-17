@@ -47,6 +47,9 @@ def admin_only(func):
     async def wrapper(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         if not user or user.id not in config.ADMIN_IDS:
+            chat = update.effective_chat
+            if chat and chat.type != "private":
+                return  # stay silent in groups
             if update.callback_query:
                 await update.callback_query.answer("⛔ دسترسی ندارید", show_alert=True)
             elif update.effective_message:
@@ -213,6 +216,31 @@ async def cmd_id(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(f"شناسه عددی شما: <code>{user.id}</code>", parse_mode=HTML)
 
 
+async def send_group_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    short = config.APP_SHORT_NAME
+    if not short:
+        await update.effective_message.reply_text("⚠️ APP_SHORT_NAME در Render تنظیم نشده است.")
+        return
+    url = f"https://t.me/{ctx.bot.username}/{short}?startapp=group"
+    await update.effective_message.reply_text(
+        "🎡 گردونه آماده است. فقط ادمین می‌تواند بچرخاند؛ نتیجه اینجا اعلام می‌شود.",
+        reply_markup=InlineKeyboardMarkup([[Btn("🎡 باز کردن گردونه", url=url)]]),
+    )
+
+
+@admin_only
+async def cmd_setgroup(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    db_of(ctx).set_setting("group_chat_id", str(update.effective_chat.id))
+    backup_of(ctx).schedule()
+    await update.effective_message.reply_text("✅ این گروه ثبت شد؛ از این به بعد برنده‌ها اینجا اعلام می‌شوند.")
+    await send_group_button(update, ctx)
+
+
+@admin_only
+async def cmd_wheel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await send_group_button(update, ctx)
+
+
 @admin_only
 async def cmd_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await show_home(update, ctx, "❎ لغو شد.\n\n")
@@ -334,7 +362,9 @@ async def on_error(update, ctx: ContextTypes.DEFAULT_TYPE):
 
 def build_application() -> Application:
     app = Application.builder().token(config.BOT_TOKEN).build()
-    app.add_handler(CommandHandler(["start", "menu"], cmd_start))
+    app.add_handler(CommandHandler(["start", "menu"], cmd_start, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("setgroup", cmd_setgroup, filters=filters.ChatType.GROUPS))
+    app.add_handler(CommandHandler("wheel", cmd_wheel, filters=filters.ChatType.GROUPS))
     app.add_handler(CommandHandler("id", cmd_id))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CallbackQueryHandler(on_callback))
