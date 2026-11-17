@@ -108,6 +108,19 @@ class Database:
                 ("1" if value else "0",),
             )
 
+    def get_setting(self, key: str, default=None):
+        with self.lock:
+            row = self.conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self.lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO settings(key, value) VALUES(?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
+
     # ---- backup ----
     def snapshot_to(self, dest_path: str) -> None:
         dest = sqlite3.connect(dest_path)
